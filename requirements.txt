@@ -1,0 +1,7 @@
+aiofile
+aiohttp
+alive-progress
+beautifulsoup4
+html5lib
+pyyaml
+psycopg2

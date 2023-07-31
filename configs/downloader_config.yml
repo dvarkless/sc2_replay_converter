@@ -1,0 +1,37 @@
+websites: ['spawningtool', 'sc2rep']
+headers:
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+
+spawningtool:
+  url: "https://lotv.spawningtool.com"
+  header: "/replays/"
+  keys:
+    coop: "coop"
+    page: "p"
+    page_start: 1
+    page_increment: 1
+    min_length: "after_time"
+    max_length: "before_time"
+    order: "order_by"
+  values:
+    coop: "n"
+    order: "play"
+
+sc2rep:
+  url: "https://sc2rep.ru"
+  header: "/search.php"
+  keys:
+    page: "page"
+    page_start: 0
+    page_increment: 20
+    gt: "gt"
+    get_1v1: "matchup1x1"
+    version: "version"
+    min_length: "length_min"
+    max_length: "length_max"
+    league: "league"
+    is_ladder_game: "ladder_custom_game"
+  values:
+    get_1v1: "1"
+    gt: "1"
+

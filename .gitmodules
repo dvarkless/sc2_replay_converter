@@ -1,0 +1,6 @@
+[submodule "starcraft2-replay-parse"]
+	path = starcraft2-replay-parse
+	url = https://github.com/dvarkless/starcraft2-replay-parse.git
+[submodule "starcraft2_replay_parse"]
+	path = starcraft2_replay_parse
+	url = https://github.com/dvarkless/starcraft2-replay-parse.git

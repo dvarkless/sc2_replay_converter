@@ -152,7 +152,6 @@ build_order:
     player_1_unit_Hellbat: 'INTEGER'
     player_1_unit_WidowMine: 'INTEGER'
     player_1_unit_SiegeTank: 'INTEGER'
-    player_1_unit_SiegeTankSieged: 'INTEGER'
     player_1_unit_Cyclone: 'INTEGER'
     player_1_unit_Thor: 'INTEGER'
     player_1_unit_Viking: 'INTEGER'
@@ -241,6 +240,8 @@ build_order:
     player_1_unit_DarkShrine: 'INTEGER'
     player_1_unit_RoboticsBay: 'INTEGER'
     player_1_unit_FleetBeacon: 'INTEGER'
+    player_1_special_minerals-available: 'INTEGER'
+    player_1_special_vespene-available: 'INTEGER'
     player_2_upgrade_AnabolicSynthesis: 'INTEGER'
     player_2_upgrade_Burrow: 'INTEGER'
     player_2_upgrade_CentrificalHooks: 'INTEGER'
@@ -346,7 +347,6 @@ build_order:
     player_2_unit_Hellbat: 'INTEGER'
     player_2_unit_WidowMine: 'INTEGER'
     player_2_unit_SiegeTank: 'INTEGER'
-    player_2_unit_SiegeTankSieged: 'INTEGER'
     player_2_unit_Cyclone: 'INTEGER'
     player_2_unit_Thor: 'INTEGER'
     player_2_unit_Viking: 'INTEGER'
@@ -435,6 +435,8 @@ build_order:
     player_2_unit_DarkShrine: 'INTEGER'
     player_2_unit_RoboticsBay: 'INTEGER'
     player_2_unit_FleetBeacon: 'INTEGER'
+    player_2_special_minerals-available: 'INTEGER'
+    player_2_special_vespene-available: 'INTEGER'
   creation_closure: 
     row0: "PRIMARY KEY (tick, game_id)"
     row1: "FOREIGN KEY (game_id) REFERENCES game_info"

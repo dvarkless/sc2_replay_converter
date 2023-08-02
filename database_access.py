@@ -100,6 +100,7 @@ class GameInfo(DB):
     def put(
         self,
         timestamp_played,
+        timestamp_processed,
         players_hash,
         end_time,
         player_1_id,
@@ -115,6 +116,7 @@ class GameInfo(DB):
     ):
         args = (
             timestamp_played,
+            timestamp_processed,
             players_hash,
             end_time,
             player_1_id,

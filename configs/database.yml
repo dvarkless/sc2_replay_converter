@@ -3,6 +3,7 @@ game_info:
   columns:
     game_id: "INTEGER SERIAL PRIMARY KEY"
     timestamp_played: "TIMESTAMP NOT NULL"
+    timestamp_processed: "TIMESTAMP"
     players_hash: "VARCHAR(64) NOT NULL"
     end_time: "INTEGER (CHECK end_time > 0)"
     player_1_id: "VARCHAR(12) NOT NULL"

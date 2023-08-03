@@ -1,7 +1,5 @@
 import logging
-from pathlib import Path
 from time import strftime, strptime
-from typing import Any, Tuple
 
 import psycopg2 as pgsql
 
@@ -41,37 +39,45 @@ class DB:
         self.conn.close()
 
     def _set_attrs(self, config_path, db_name):
-        self.schema_config = get_config(config_path)[db_name]
-        self.column_names = self.schema_config["columns"].keys()
-        self.name = self.schema_config["table_name"]
+        self.db_config = get_config(config_path)[db_name]
+        self.name = self.db_config["table_name"]
+
+    def _save_changes(self):
+        try:
+            self.conn.commit()
+        except (Exception, pgsql.DatabaseError) as error:
+            self.logger.critical(error)
+            print(error)
+            self.conn.rollback()
+        self.logger.info(f'manual commit at "{self.name}"')
+
+    def drop(self):
+        query = open(self.db_config["drop_table_file"]).read()
+        self._exec_update(query, self.name)
+        self.logger.info(f'table "{self.name}" dropped')
+
+    def get_columns(self):
+        query = open(self.db_config["get_columns_file"]).read().format(self.name)
+        self._exec_query_one(query)
 
     def create_table(self):
-        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
-        for key, val in self.schema_config["columns"].items():
-            to_append = f"{key} {val},\n"
-            query += to_append
-        if "creation_closure" in self.schema_config:
-            query += ",\n".join(self.schema_config["creation_closure"].values())
-        query += ");"
+        query_path = self.db_config["create_table_file"]
+        self.cur.execute(open(query_path).read())
+        self._save_changes()
 
-        self.cur.execute(query)
-
-    def _table_exists(self, tb_name):
-        self.cur.execute(
-            """SELECT table_name FROM information_schema.tables
-               WHERE table_schema = 'public'"""
-        )
-        tables = list(self.cur.fetchall())
-        return tb_name in tables
+    def exists(self):
+        query = open(self.db_config["get_tables_file"]).read()
+        tables = list(self._exec_query_many(query))
+        return self.name in tables
 
     def _exec_query_one(self, query, *args):
-        self.last_query = query.replace("?", "{}").format(*args)
+        self.last_query = query.replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
         return self.cur.fetchone()
 
     def _exec_query_many(self, query, *args):
-        self.last_query = query.replace("?", "{}").format(*args)
+        self.last_query = query.replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
         while True:
@@ -79,7 +85,7 @@ class DB:
             yield item if item is not None else StopIteration
 
     def _exec_update(self, query, *args):
-        self.last_query = query.replace("?", "{}").format(*args)
+        self.last_query = query.replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
 
@@ -91,9 +97,9 @@ class DB:
 
 
 class GameInfo(DB):
-    def __init__(self, secrets_path: str, schema_config_path: str):
+    def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
-        self._set_attrs(schema_config_path, "game_info")
+        self._set_attrs(db_config_path, "game_info")
 
     def put(
         self,
@@ -112,7 +118,7 @@ class GameInfo(DB):
         is_ladder,
         replay_path,
     ):
-        args = (
+        query_args = [
             timestamp_played,
             timestamp_processed,
             players_hash,
@@ -127,11 +133,9 @@ class GameInfo(DB):
             matchup,
             is_ladder,
             replay_path,
-        )
-        query = f"INSERT INTO {self.name} ({tuple(self.column_names[1:])})\n"
-        query += f"VALUES ({', '.join(['%s' for _ in args])})\n"
-        query += "RETURNING id;"
-        return self._exec_query_one(query, *args)[0]
+        ]
+        query = open(self.db_config["insert_file"]).read()
+        return self._exec_query_one(query, *query_args)[0]
 
     def get(self, *args):
         if args:
@@ -142,9 +146,9 @@ class GameInfo(DB):
 
 
 class PlayerInfo(DB):
-    def __init__(self, secrets_path: str, schema_config_path: str):
+    def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
-        self._set_attrs(schema_config_path, "player_info")
+        self._set_attrs(db_config_path, "player_info")
 
     def put(
         self,
@@ -155,7 +159,6 @@ class PlayerInfo(DB):
         is_win: bool,
     ):
         get_args_dict = {
-            "nickname": "",
             "games_played": 0,
             "zerg_played": 0,
             "protoss_played": 0,
@@ -165,11 +168,9 @@ class PlayerInfo(DB):
             "most_played_race": "Z",
             "highest_league": 0,
         }
-        get_prev_query = f"""SELECT ({', '.join(['%s' for _ in get_args_dict.keys()])})
-                             FROM {self.name},
-                             WHERE id = {battle_tag},
-                             """
-        query_result = self._exec_query_one(get_prev_query, get_args_dict.keys())
+        get_prev_query = open(self.db_config["preinsert_select_file"]).read()
+        get_prev_query_args = list(get_args_dict.keys()) + [battle_tag]
+        query_result = self._exec_query_one(get_prev_query, *get_prev_query_args)[0]
         if query_result is not None:
             for i, key in enumerate(get_args_dict.keys()):
                 get_args_dict[key] = query_result[i]
@@ -201,9 +202,9 @@ class PlayerInfo(DB):
             get_args_dict["highest_league"], league_int
         )
 
-        query = f"INSERT INTO {self.name} ({tuple(get_args_dict.keys())})\n"
-        query += f"VALUES ({', '.join(['%s' for _ in get_args_dict.values()])});"
-        self._exec_update(query, *get_args_dict.values())
+        query = open(self.db_config["insert_file"]).read()
+        query_args = list(get_args_dict.keys()) + list(get_args_dict.values())
+        self._exec_update(query, *query_args)
 
     def get(self, *args):
         if args:
@@ -214,9 +215,9 @@ class PlayerInfo(DB):
 
 
 class MapInfo(DB):
-    def __init__(self, secrets_path: str, schema_config_path: str):
+    def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
-        self._set_attrs(schema_config_path, "map_info")
+        self._set_attrs(db_config_path, "map_info")
 
     def put(
         self,
@@ -231,12 +232,9 @@ class MapInfo(DB):
             "matchup_type": matchup_type,
             "first_game_date": "01-01-2010",
         }
-
-        get_prev_query = f"""SELECT ({', '.join(['%s' for _ in get_args_dict.keys()])})
-                             FROM {self.name},
-                             WHERE map_hash = {map_hash},
-                             """
-        query_result = self._exec_query_one(get_prev_query, get_args_dict.keys())
+        get_prev_query = open(self.db_config["preinsert_select_file"]).read()
+        get_prev_query_args = list(get_args_dict.keys()) + [map_hash]
+        query_result = self._exec_query_one(get_prev_query, *get_prev_query_args)[0]
         if query_result is not None:
             for i, key in enumerate(get_args_dict.keys()):
                 get_args_dict[key] = query_result[i]
@@ -245,9 +243,9 @@ class MapInfo(DB):
         new_date = max(new_date, old_date)
         get_args_dict["first_game_date"] = strftime("%d-%M-%Y", new_date)
 
-        query = f"INSERT INTO {self.name} ({tuple(get_args_dict.keys())})\n"
-        query += f"VALUES ({', '.join(['%s' for _ in get_args_dict.values()])});"
-        self._exec_update(query, *get_args_dict.values())
+        query = open(self.db_config["insert_file"]).read()
+        query_args = list(get_args_dict.keys()) + list(get_args_dict.values())
+        self._exec_update(query, *query_args)
 
     def get(self, *args):
         if args:
@@ -258,14 +256,15 @@ class MapInfo(DB):
 
 
 class BuildOrder(DB):
-    def __init__(self, secrets_path: str, schema_config_path: str):
+    def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
-        self._set_attrs(schema_config_path, "build_order")
+        self._set_attrs(db_config_path, "build_order")
 
     def put(self, **col_data):
-        query = f"INSERT INTO {self.name} ({tuple(col_data.keys())})\n"
-        query += f"VALUES ({', '.join(['%s' for _ in col_data.values()])});"
-        self._exec_update(query, *col_data.values())
+        query = open(self.db_config["insert_file"]).read()
+        query.format(", ".join(["%s" for _ in col_data.values()]))
+        query_args = list(col_data.keys()) + list(col_data.values())
+        self._exec_update(query, *query_args)
 
     def get(self, *args):
         if args:

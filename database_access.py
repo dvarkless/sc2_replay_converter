@@ -2,6 +2,7 @@ import logging
 from time import strftime, strptime
 
 import psycopg2 as pgsql
+from psycopg2 import sql
 
 from config import get_config
 from setup_handler import get_handler
@@ -38,6 +39,15 @@ class DB:
             self.logger.error(f"{type}: {exc_value}\n{traceback}")
         self.conn.close()
 
+    @property
+    def query(self):
+        return self._query
+
+    @query.setter
+    def query(self, query_file):
+        _query = open(query_file).read()
+        self._query = self._compose_query(_query)
+
     def _set_attrs(self, config_path, db_name):
         self.db_config = get_config(config_path)[db_name]
         self.name = self.db_config["table_name"]
@@ -51,14 +61,20 @@ class DB:
             self.conn.rollback()
         self.logger.info(f'manual commit at "{self.name}"')
 
+    def _compose_query(self, query):
+        if "{}" in query:
+            return sql.SQL(query).format(sql.Identifier(self.name))
+        else:
+            return sql.SQL(query)
+
     def drop(self):
-        query = open(self.db_config["drop_table_file"]).read()
-        self._exec_update(query, self.name)
+        self.query = self.db_config["drop_table_file"]
+        self._exec_update(self.query, self.name)
         self.logger.info(f'table "{self.name}" dropped')
 
     def get_columns(self):
-        query = open(self.db_config["get_columns_file"]).read().format(self.name)
-        self._exec_query_one(query)
+        self.query = self.db_config["get_columns_file"]
+        self._exec_query_one(self.query)
 
     def create_table(self):
         query_path = self.db_config["create_table_file"]
@@ -66,18 +82,18 @@ class DB:
         self._save_changes()
 
     def exists(self):
-        query = open(self.db_config["get_tables_file"]).read()
-        tables = list(self._exec_query_many(query))
+        self.query = self.db_config["get_tables_file"]
+        tables = list(self._exec_query_many(self.query))
         return self.name in tables
 
     def _exec_query_one(self, query, *args):
-        self.last_query = query.replace("%s", "{}").format(*args)
+        self.last_query = str(query).replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
         return self.cur.fetchone()
 
     def _exec_query_many(self, query, *args):
-        self.last_query = query.replace("%s", "{}").format(*args)
+        self.last_query = str(query).replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
         while True:
@@ -85,7 +101,7 @@ class DB:
             yield item if item is not None else StopIteration
 
     def _exec_update(self, query, *args):
-        self.last_query = query.replace("%s", "{}").format(*args)
+        self.last_query = str(query).replace("%s", "{}").format(*args)
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
 
@@ -134,8 +150,8 @@ class GameInfo(DB):
             is_ladder,
             replay_path,
         ]
-        query = open(self.db_config["insert_file"]).read()
-        return self._exec_query_one(query, *query_args)[0]
+        self.query = self.db_config["insert_file"]
+        return self._exec_query_one(self.query, *query_args)[0]
 
     def get(self, *args):
         if args:

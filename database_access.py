@@ -40,6 +40,22 @@ class DB:
             self.logger.error(f"{type}: {exc_value}\n{traceback}")
         self.conn.close()
 
+    def _set_attrs(self, config_path, db_name):
+        self.schema_config = get_config(config_path)[db_name]
+        self.column_names = self.schema_config["columns"].keys()
+        self.name = self.schema_config["table_name"]
+
+    def create_table(self):
+        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
+        for key, val in self.schema_config["columns"].items():
+            to_append = f"{key} {val},\n"
+            query += to_append
+        if "creation_closure" in self.schema_config:
+            query += ",\n".join(self.schema_config["creation_closure"].values())
+        query += ");"
+
+        self.cur.execute(query)
+
     def _table_exists(self, tb_name):
         self.cur.execute(
             """SELECT table_name FROM information_schema.tables
@@ -67,9 +83,6 @@ class DB:
         self.cur.execute(query, args)
         self.logger.debug(self.last_query)
 
-    def create_table(self):
-        raise NotImplementedError
-
     def put(self, *args):
         raise NotImplementedError
 
@@ -80,22 +93,7 @@ class DB:
 class GameInfo(DB):
     def __init__(self, secrets_path: str, schema_config_path: str):
         super().__init__(secrets_path)
-
-        self.schema_config = get_config(schema_config_path)["game_info"]
-        self.column_names = self.schema_config["columns"]
-        self.name = self.schema_config["table_name"]
-
-    def create_table(self):
-        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
-        for key, val in self.column_names.items():
-            to_append = f"{key} {val},\n"
-            query += to_append
-        if "creation_closure" in self.schema_config:
-            for _, val in self.schema_config["creation_closure"]:
-                query += f"{val},\n"
-        query += ")"
-
-        self.cur.execute(query)
+        self._set_attrs(schema_config_path, "game_info")
 
     def put(
         self,
@@ -131,8 +129,9 @@ class GameInfo(DB):
             replay_path,
         )
         query = f"INSERT INTO {self.name} ({tuple(self.column_names[1:])})\n"
-        query += f"VALUES ({', '.join(['%s' for _ in args])});"
-        self._exec_update(query, *args)
+        query += f"VALUES ({', '.join(['%s' for _ in args])})\n"
+        query += "RETURNING id;"
+        return self._exec_query_one(query, *args)[0]
 
     def get(self, *args):
         if args:
@@ -145,22 +144,7 @@ class GameInfo(DB):
 class PlayerInfo(DB):
     def __init__(self, secrets_path: str, schema_config_path: str):
         super().__init__(secrets_path)
-
-        self.schema_config = get_config(schema_config_path)["player_info"]
-        self.column_names = self.schema_config["columns"]
-        self.name = self.schema_config["table_name"]
-
-    def create_table(self):
-        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
-        for key, val in self.column_names.items():
-            to_append = f"{key} {val},\n"
-            query += to_append
-        if "creation_closure" in self.schema_config:
-            for _, val in self.schema_config["creation_closure"]:
-                query += f"{val},\n"
-        query += ")"
-
-        self.cur.execute(query)
+        self._set_attrs(schema_config_path, "player_info")
 
     def put(
         self,
@@ -171,6 +155,7 @@ class PlayerInfo(DB):
         is_win: bool,
     ):
         get_args_dict = {
+            "nickname": "",
             "games_played": 0,
             "zerg_played": 0,
             "protoss_played": 0,
@@ -188,6 +173,7 @@ class PlayerInfo(DB):
         if query_result is not None:
             for i, key in enumerate(get_args_dict.keys()):
                 get_args_dict[key] = query_result[i]
+        get_args_dict["nickname"] = nickname
         get_args_dict["games_played"] += 1
         if race.casefold() == "z":
             get_args_dict["zerg_played"] += 1
@@ -230,22 +216,7 @@ class PlayerInfo(DB):
 class MapInfo(DB):
     def __init__(self, secrets_path: str, schema_config_path: str):
         super().__init__(secrets_path)
-
-        self.schema_config = get_config(schema_config_path)["map_info"]
-        self.column_names = self.schema_config["columns"]
-        self.name = self.schema_config["table_name"]
-
-    def create_table(self):
-        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
-        for key, val in self.column_names.items():
-            to_append = f"{key} {val},\n"
-            query += to_append
-        if "creation_closure" in self.schema_config:
-            for _, val in self.schema_config["creation_closure"]:
-                query += f"{val},\n"
-        query += ")"
-
-        self.cur.execute(query)
+        self._set_attrs(schema_config_path, "map_info")
 
     def put(
         self,
@@ -289,22 +260,7 @@ class MapInfo(DB):
 class BuildOrder(DB):
     def __init__(self, secrets_path: str, schema_config_path: str):
         super().__init__(secrets_path)
-
-        self.schema_config = get_config(schema_config_path)["build_order"]
-        self.column_names = self.schema_config["columns"]
-        self.name = self.schema_config["table_name"]
-
-    def create_table(self):
-        query = f"CREATE TABLE IF NOT EXISTS {self.name}(\n"
-        for key, val in self.column_names.items():
-            to_append = f"{key} {val},\n"
-            query += to_append
-        if "creation_closure" in self.schema_config:
-            for _, val in self.schema_config["creation_closure"]:
-                query += f"{val},\n"
-        query += ")"
-
-        self.cur.execute(query)
+        self._set_attrs(schema_config_path, "build_order")
 
     def put(self, **col_data):
         query = f"INSERT INTO {self.name} ({tuple(col_data.keys())})\n"

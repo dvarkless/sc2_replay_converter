@@ -1,11 +1,11 @@
 game_info:
   table_name: "game_info"
   columns:
-    game_id: "INTEGER SERIAL PRIMARY KEY"
+    game_id: "SERIAL PRIMARY KEY"
     timestamp_played: "TIMESTAMP NOT NULL"
     timestamp_processed: "TIMESTAMP"
     players_hash: "VARCHAR(64) NOT NULL"
-    end_time: "INTEGER (CHECK end_time > 0)"
+    end_time: "INTEGER CHECK (end_time > 0)"
     player_1_id: "VARCHAR(12) NOT NULL"
     player_1_race: "VARCHAR(1) NOT NULL"
     player_1_league: "INTEGER"
@@ -46,7 +46,7 @@ map_info:
 build_order:
   table_name: "build_order"
   columns:
-    tick: "INTEGER (CHECK tick > 0)"
+    tick: "INTEGER CHECK (tick > 0)"
     game_id: "VARCHAR(50)"
     player_1_upgrade_AnabolicSynthesis: 'INTEGER'
     player_1_upgrade_Burrow: 'INTEGER'

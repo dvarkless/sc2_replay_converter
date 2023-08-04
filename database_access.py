@@ -11,12 +11,7 @@ from setup_handler import get_handler
 class DB:
     def __init__(self, config_path: str):
         self.config = get_config(config_path)
-        self.conn = pgsql.connect(
-            host=self.config["db_host"],
-            database=self.config["db_name"],
-            user=self.config["db_user"],
-            password=self.config["db_password"],
-        )
+        self.conn = self._connect()
 
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(get_handler())
@@ -36,7 +31,7 @@ class DB:
         else:
             self.conn.commit()
         if exc_type:
-            self.logger.error(f"{type}: {exc_value}\n{traceback}")
+            self.logger.error(f"{exc_type}: {exc_value}\n{traceback}")
         self.conn.close()
 
     @property
@@ -47,6 +42,14 @@ class DB:
     def query(self, query_file):
         _query = open(query_file).read()
         self._query = self._compose_query(_query)
+
+    def _connect(self):
+        return pgsql.connect(
+            host=self.config["db_host"],
+            database=self.config["db_name"],
+            user=self.config["db_user"],
+            password=self.config["db_password"],
+        )
 
     def _set_attrs(self, config_path, db_name):
         self.db_config = get_config(config_path)[db_name]
@@ -59,6 +62,7 @@ class DB:
             self.logger.critical(error)
             print(error)
             self.conn.rollback()
+        self.cur = self.conn.cursor()
         self.logger.info(f'manual commit at "{self.name}"')
 
     def _compose_query(self, query):
@@ -78,7 +82,17 @@ class DB:
 
     def create_table(self):
         query_path = self.db_config["create_table_file"]
-        self.cur.execute(open(query_path).read())
+        try:
+            self.cur.execute(open(query_path).read())
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn.rollback()
+        except pgsql.InterfaceError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn = self._connect()
+            self.cur = self.conn.cursor()
         self._save_changes()
 
     def exists(self):
@@ -88,21 +102,63 @@ class DB:
 
     def _exec_query_one(self, query, *args):
         self.last_query = str(query).replace("%s", "{}").format(*args)
-        self.cur.execute(query, args)
+        try:
+            self.cur.execute(query, args)
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn.rollback()
+        except pgsql.InterfaceError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn = self._connect()
+            self.cur = self.conn.cursor()
+
         self.logger.debug(self.last_query)
-        return self.cur.fetchone()
+        out = None
+        try:
+            out = self.cur.fetchone()
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.warning(e)
+        return out
 
     def _exec_query_many(self, query, *args):
         self.last_query = str(query).replace("%s", "{}").format(*args)
-        self.cur.execute(query, args)
+        try:
+            self.cur.execute(query, args)
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn.rollback()
+        except pgsql.InterfaceError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn = self._connect()
+            self.cur = self.conn.cursor()
         self.logger.debug(self.last_query)
         while True:
-            item = self.cur.fetchone()
+            item = None
+            try:
+                item = self.cur.fetchone()
+            except pgsql.ProgrammingError as e:
+                print(e)
+                self.logger.warning(e)
             yield item if item is not None else StopIteration
 
     def _exec_update(self, query, *args):
         self.last_query = str(query).replace("%s", "{}").format(*args)
-        self.cur.execute(query, args)
+        try:
+            self.cur.execute(query, args)
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn.rollback()
+        except pgsql.InterfaceError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn = self._connect()
+            self.cur = self.conn.cursor()
         self.logger.debug(self.last_query)
 
     def put(self, *args):
@@ -120,13 +176,13 @@ class GameInfo(DB):
     def put(
         self,
         timestamp_played,
-        timestamp_processed,
+        date_processed,
         players_hash,
         end_time,
         player_1_id,
         player_1_race,
         player_1_league,
-        player_2,
+        player_2_id,
         player_2_race,
         player_2_league,
         map_hash,
@@ -136,13 +192,13 @@ class GameInfo(DB):
     ):
         query_args = [
             timestamp_played,
-            timestamp_processed,
+            date_processed,
             players_hash,
             end_time,
             player_1_id,
             player_1_race,
             player_1_league,
-            player_2,
+            player_2_id,
             player_2_race,
             player_2_league,
             map_hash,

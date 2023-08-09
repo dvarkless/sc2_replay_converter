@@ -1,3 +1,2 @@
-INSERT INTO game_info (timestamp_played, timestamp_processed, players_hash, end_time, player_1_id, player_1_race, player_1_league, player_2_id, player_2_race, player_2_league, map_hash, matchup, is_ladder, replay_path)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-RETURNING game_id;
+INSERT INTO game_info(timestamp_played, date_processed, players_hash, end_time, player_1_id, player_1_race, player_1_league, player_2_id, player_2_race, player_2_league, map_hash, matchup, is_ladder, replay_path)
+VALUES (%(timestamp_played)s, %(date_processed)s, %(players_hash)s, %(end_time)s, %(player_1_id)s, %(player_1_race)s, %(player_1_league)s, %(player_2_id)s, %(player_2_race)s, %(player_2_league)s, %(map_hash)s, %(matchup)s, %(is_ladder)s, %(replay_path)s) RETURNING game_id;

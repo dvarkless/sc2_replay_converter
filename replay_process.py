@@ -1,6 +1,8 @@
 from pathlib import Path
+import time
 
 from alive_progress import alive_it
+import pandas as pd
 
 from database_access import BuildOrder, GameInfo, MapInfo, PlayerInfo
 from starcraft2_replay_parse.replay_tools import BuildOrderData, ReplayData
@@ -23,11 +25,9 @@ class ReplayProcess:
 
         self.init_dbs()
         self.build_order_cls = BuildOrderData(max_tick, ticks_per_pos, game_data_path)
+        self.game_data = pd.read_csv(game_data_path, index_col="name")
 
     def init_dbs(self):
-        for db in self.dbs:
-            with db:
-                db.drop()
         for db in self.dbs:
             with db:
                 db.create_table()
@@ -64,7 +64,8 @@ class ReplayProcess:
         game_info["matchup"] = replay_data["matchup"]
         game_info["is_ladder"] = replay.is_ranked
         game_info["replay_path"] = str(replay_path.resolve())
-        self.upload_info(self.game_info_db, **game_info)
+        game_id = self.upload_info(self.game_info_db, game_info)
+        return game_id
 
     def upload_map_info(self, replay):
         replay_data = replay.as_dict()
@@ -75,48 +76,64 @@ class ReplayProcess:
             "map_hash": replay.map_hash,
             "map_name": replay.map_name,
             "matchup_type": matchup_type,
-            "first_game_date": date.strftime("%d-%m-%Y"),
+            "game_date": date,
         }
-        self.upload_info(self.map_info_db, **map_info)
+        self.upload_info(self.map_info_db, map_info)
 
     def upload_player_info(self, replay):
         replay_data = replay.as_dict()
         for name in replay.player_names:
             player_info = {
-                "battle_tag": replay_data["players_data"][name]["id"],
+                "player_id": replay_data["players_data"][name]["id"],
                 "nickname": name,
                 "race": replay_data["players_data"][name]["race"][0].lower(),
                 "league_int": replay_data["players_data"][name]["league"],
                 "is_win": name in replay_data["winners"],
             }
-            self.upload_info(self.player_info_db, **player_info)
+            self.upload_info(self.player_info_db, player_info)
 
-    def upload_build_order(self, replay):
+    def upload_build_order(self, replay, game_id, bar=None):
         replay_data = replay.as_dict()
-        for build_order_dict in self.build_order_cls.yield_unit_counts(replay_data):
-            self.upload_info(self.build_order_db, **build_order_dict)
+        full_upload_dict = dict()
+        for i, build_order_dict in enumerate(self.build_order_cls.yield_unit_counts(replay_data)):
+            for key, val in build_order_dict.items():
+                try:
+                    val_type = self.game_data.loc[key, "type"].lower()
+                except KeyError:
+                    val_type = "special"
+                new_key = f"player_{i+1}_{val_type}_{key}"
+                full_upload_dict[new_key] = val
 
-    def upload_info(self, db, *args, **kwargs):
-        if args:
-            db.put(*args)
-        elif kwargs:
-            db.put(**kwargs)
-        else:
-            ValueError("Empty arguments")
+        ticks = self.build_order_cls.get_ticks()
+        ticks_len = len(ticks)
+        for j, tick in enumerate(ticks):
+            to_upload_dict = dict()
+            for key, val in full_upload_dict.items():
+                to_upload_dict[key] = val[j]
+            to_upload_dict["game_id"] = game_id
+            to_upload_dict["tick"] = tick
+            if bar is not None:
+                bar.text = f"Processed {j/ticks_len:.1%}"
+            self.upload_info(self.build_order_db, to_upload_dict)
+
+    def upload_info(self, db, to_upload_dict):
+        out = None
+        with db:
+            out = db.put(**to_upload_dict)
+        return out
 
     def process_replays(self, replay_dir):
         replay_dir = Path(replay_dir)
         list_file = [p for p in replay_dir.iterdir() if p.suffix == ".SC2Replay"]
         bar = alive_it(list_file)
 
-        for i, replay_path in enumerate(bar):
-            bar.text = f"Processing {i}/{len(list_file)}"
-
+        for replay_path in bar:
             replay = ReplayData().parse_replay(replay_path)
-            self.upload_game_info(replay, replay_path)
             self.upload_map_info(replay)
+            print(self.map_info_db.last_query)
             self.upload_player_info(replay)
-            self.upload_build_order(replay)
+            id = self.upload_game_info(replay, replay_path)
+            self.upload_build_order(replay, id, bar=bar)
 
 
 if __name__ == "__main__":

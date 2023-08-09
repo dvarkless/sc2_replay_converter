@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from time import strftime, strptime
 
 import psycopg2 as pgsql
@@ -8,20 +9,30 @@ from config import get_config
 from setup_handler import get_handler
 
 
-class DB:
+class Singleton(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
+class DB(metaclass=Singleton):
     def __init__(self, config_path: str):
         self.config = get_config(config_path)
-        self.conn = self._connect()
-
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(get_handler())
         self.logger.setLevel(logging.DEBUG)
 
     def __enter__(self):
+        self.conn = self._get_connection()
         try:
             self.cur = self.conn.cursor()
         except (Exception, pgsql.DatabaseError) as error:
+            print(f"Critical: {error}")
             self.logger.critical(error)
+            raise pgsql.DatabaseError(error)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -43,7 +54,7 @@ class DB:
         _query = open(query_file).read()
         self._query = self._compose_query(_query)
 
-    def _connect(self):
+    def _get_connection(self):
         return pgsql.connect(
             host=self.config["db_host"],
             database=self.config["db_name"],
@@ -78,7 +89,7 @@ class DB:
 
     def get_columns(self):
         self.query = self.db_config["get_columns_file"]
-        self._exec_query_one(self.query)
+        return self._exec_query_one(self.query, {})
 
     def create_table(self):
         query_path = self.db_config["create_table_file"]
@@ -91,19 +102,20 @@ class DB:
         except pgsql.InterfaceError as e:
             print(e)
             self.logger.error(e)
-            self.conn = self._connect()
+            self.conn = self._get_connection()
             self.cur = self.conn.cursor()
         self._save_changes()
 
     def exists(self):
         self.query = self.db_config["get_tables_file"]
-        tables = list(self._exec_query_many(self.query))
+        tables = list(self._exec_query_many(self.query, {}))
         return self.name in tables
 
-    def _exec_query_one(self, query, *args):
-        self.last_query = str(query).replace("%s", "{}").format(*args)
+    def _exec_query_one(self, query, kwargs):
+        query = self.cur.mogrify(query, kwargs)
+        self.last_query = query
         try:
-            self.cur.execute(query, args)
+            self.cur.execute(query)
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.error(e)
@@ -111,7 +123,7 @@ class DB:
         except pgsql.InterfaceError as e:
             print(e)
             self.logger.error(e)
-            self.conn = self._connect()
+            self.conn = self._get_connection()
             self.cur = self.conn.cursor()
 
         self.logger.debug(self.last_query)
@@ -121,12 +133,13 @@ class DB:
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.warning(e)
-        return out
+        return out if out else None
 
-    def _exec_query_many(self, query, *args):
-        self.last_query = str(query).replace("%s", "{}").format(*args)
+    def _exec_query_many(self, query, kwargs):
+        query = self.cur.mogrify(query, kwargs)
+        self.last_query = query
         try:
-            self.cur.execute(query, args)
+            self.cur.execute(query)
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.error(e)
@@ -134,7 +147,7 @@ class DB:
         except pgsql.InterfaceError as e:
             print(e)
             self.logger.error(e)
-            self.conn = self._connect()
+            self.conn = self._get_connection()
             self.cur = self.conn.cursor()
         self.logger.debug(self.last_query)
         while True:
@@ -146,10 +159,11 @@ class DB:
                 self.logger.warning(e)
             yield item if item is not None else StopIteration
 
-    def _exec_update(self, query, *args):
-        self.last_query = str(query).replace("%s", "{}").format(*args)
+    def _exec_insert(self, query, kwargs):
+        query = self.cur.mogrify(query, kwargs)
+        self.last_query = query
         try:
-            self.cur.execute(query, args)
+            self.cur.execute(query)
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.error(e)
@@ -157,14 +171,30 @@ class DB:
         except pgsql.InterfaceError as e:
             print(e)
             self.logger.error(e)
-            self.conn = self._connect()
+            self.conn = self._get_connection()
             self.cur = self.conn.cursor()
         self.logger.debug(self.last_query)
 
-    def put(self, *args):
+    def _exec_update(self, query, kwargs):
+        query = self.cur.mogrify(query, kwargs)
+        self.last_query = query
+        try:
+            self.cur.execute(query)
+        except pgsql.ProgrammingError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn.rollback()
+        except pgsql.InterfaceError as e:
+            print(e)
+            self.logger.error(e)
+            self.conn = self._get_connection()
+            self.cur = self.conn.cursor()
+        self.logger.debug(self.last_query)
+
+    def put(self, args):
         raise NotImplementedError
 
-    def get(self, *args):
+    def get(self, args):
         raise NotImplementedError
 
 
@@ -190,31 +220,35 @@ class GameInfo(DB):
         is_ladder,
         replay_path,
     ):
-        query_args = [
-            timestamp_played,
-            date_processed,
-            players_hash,
-            end_time,
-            player_1_id,
-            player_1_race,
-            player_1_league,
-            player_2_id,
-            player_2_race,
-            player_2_league,
-            map_hash,
-            matchup,
-            is_ladder,
-            replay_path,
-        ]
+        timestamp_played = pgsql.TimestampFromTicks(timestamp_played)
+        query_args = {
+            "timestamp_played": timestamp_played,
+            "date_processed": date_processed,
+            "players_hash": players_hash,
+            "end_time": end_time,
+            "player_1_id": player_1_id,
+            "player_1_race": player_1_race,
+            "player_1_league": player_1_league,
+            "player_2_id": player_2_id,
+            "player_2_race": player_2_race,
+            "player_2_league": player_2_league,
+            "map_hash": map_hash,
+            "matchup": matchup,
+            "is_ladder": is_ladder,
+            "replay_path": replay_path,
+        }
         self.query = self.db_config["insert_file"]
-        return self._exec_query_one(self.query, *query_args)[0]
+        game_id = self._exec_query_one(self.query, query_args)
+        if game_id is None:
+            raise ValueError(f"returning game_id = {game_id}")
+        return game_id[0]
 
-    def get(self, *args):
+    def get(self, args: tuple):
         if args:
             query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
         else:
             query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, *args)
+        self._exec_query_many(query, args)
 
 
 class PlayerInfo(DB):
@@ -224,7 +258,7 @@ class PlayerInfo(DB):
 
     def put(
         self,
-        battle_tag: int,
+        player_id: int,
         nickname: str,
         race: str,
         league_int: int,
@@ -237,16 +271,19 @@ class PlayerInfo(DB):
             "terran_played": 0,
             "wins": 0,
             "loses": 0,
-            "most_played_race": "Z",
+            "most_played_race": "z",
             "highest_league": 0,
         }
         get_prev_query = open(self.db_config["preinsert_select_file"]).read()
-        get_prev_query_args = list(get_args_dict.keys()) + [battle_tag]
-        query_result = self._exec_query_one(get_prev_query, *get_prev_query_args)[0]
+        pass_id = {"player_id": player_id}
+        query_result = self._exec_query_one(get_prev_query, pass_id)
+        val_exists = False
         if query_result is not None:
+            val_exists = True
             for i, key in enumerate(get_args_dict.keys()):
                 get_args_dict[key] = query_result[i]
         get_args_dict["nickname"] = nickname
+        get_args_dict["player_id"] = player_id
         get_args_dict["games_played"] += 1
         if race.casefold() == "z":
             get_args_dict["zerg_played"] += 1
@@ -267,7 +304,7 @@ class PlayerInfo(DB):
             get_args_dict["protoss_played"],
             get_args_dict["terran_played"],
         ]
-        get_args_dict["most_played_race"] = ["Z", "P", "T"][
+        get_args_dict["most_played_race"] = ["z", "p", "t"][
             race_plays.index(max(race_plays))
         ]
         get_args_dict["highest_league"] = max(
@@ -275,15 +312,19 @@ class PlayerInfo(DB):
         )
 
         query = open(self.db_config["insert_file"]).read()
-        query_args = list(get_args_dict.keys()) + list(get_args_dict.values())
-        self._exec_update(query, *query_args)
+        if val_exists:
+            self.query = self.db_config["update_file"]
+            self._exec_update(query, get_args_dict)
+        else:
+            self.query = self.db_config["insert_file"]
+            self._exec_insert(query, get_args_dict)
 
-    def get(self, *args):
+    def get(self, args):
         if args:
             query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
         else:
             query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, *args)
+        self._exec_query_many(query, args)
 
 
 class MapInfo(DB):
@@ -296,35 +337,40 @@ class MapInfo(DB):
         map_hash: str,
         map_name: str,
         matchup_type: str,
-        game_date: str,
+        game_date,
     ):
+        game_date = datetime.date(game_date)
         get_args_dict = {
             "map_hash": map_hash,
             "map_name": map_name,
             "matchup_type": matchup_type,
-            "first_game_date": "01-01-2010",
+            "first_game_date": datetime(2010, 1, 1).date(),
         }
         get_prev_query = open(self.db_config["preinsert_select_file"]).read()
-        get_prev_query_args = list(get_args_dict.keys()) + [map_hash]
-        query_result = self._exec_query_one(get_prev_query, *get_prev_query_args)[0]
+        pass_hash = {"map_hash": map_hash}
+        query_result = self._exec_query_one(get_prev_query, pass_hash)
+        val_exists = False
         if query_result is not None:
+            val_exists = True
             for i, key in enumerate(get_args_dict.keys()):
                 get_args_dict[key] = query_result[i]
-        new_date = strptime(game_date, "%d-%M-%Y")
-        old_date = strptime(get_args_dict["first_game_date"], "%d-%M-%Y")
-        new_date = max(new_date, old_date)
-        get_args_dict["first_game_date"] = strftime("%d-%M-%Y", new_date)
 
-        query = open(self.db_config["insert_file"]).read()
-        query_args = list(get_args_dict.keys()) + list(get_args_dict.values())
-        self._exec_update(query, *query_args)
+        first_date = get_args_dict["first_game_date"]
+        get_args_dict["first_game_date"] = max(game_date, first_date)
 
-    def get(self, *args):
+        if val_exists:
+            self.query = self.db_config["update_file"]
+            self._exec_update(self.query, get_args_dict)
+        else:
+            self.query = self.db_config["insert_file"]
+            self._exec_insert(self.query, get_args_dict)
+
+    def get(self, args):
         if args:
             query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
         else:
             query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, *args)
+        self._exec_query_many(query, args)
 
 
 class BuildOrder(DB):
@@ -333,14 +379,12 @@ class BuildOrder(DB):
         self._set_attrs(db_config_path, "build_order")
 
     def put(self, **col_data):
-        query = open(self.db_config["insert_file"]).read()
-        query.format(", ".join(["%s" for _ in col_data.values()]))
-        query_args = list(col_data.keys()) + list(col_data.values())
-        self._exec_update(query, *query_args)
+        self.query = self.db_config["insert_file"]
+        self._exec_insert(self.query, col_data)
 
-    def get(self, *args):
+    def get(self, args):
         if args:
             query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
         else:
             query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, *args)
+        self._exec_query_many(query, args)

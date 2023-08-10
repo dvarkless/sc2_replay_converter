@@ -6,6 +6,8 @@ game_info:
   get_columns_file: "./queries/get_columns.sql"
   get_tables_file: "./queries/get_tables.sql"
   drop_table_file: "./queries/drop_table.sql"
+  select_game_id_file: "./queries/select_id_game_info.sql"
+  update_path_file: "./queries/update_path_game_info.sql"
     
 player_info:  
   table_name: "player_info"

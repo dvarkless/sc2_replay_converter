@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS player_info(
 player_id INTEGER PRIMARY KEY,
-nickname VARCHAR(12),
+nickname VARCHAR(30),
 games_played INTEGER,
 zerg_played INTEGER,
 protoss_played INTEGER,

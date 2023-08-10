@@ -39,7 +39,7 @@ class ReplayDownloader:
         destination_path,
         config_path,
         max_count: int = -1,
-        jupyter=False,
+        jupyter=None,
     ) -> None:
         self.config = get_config(config_path)
         self.max_count = max_count if max_count > 0 else 10e5
@@ -75,7 +75,10 @@ class ReplayDownloader:
         )
         page_start = self.config[self.website_name]["keys"]["page_start"]
         max_page = self._get_max_pages(init_soup)
-        bar = alive_it(range(page_start, max_page), force_tty=self.jupyter)
+        if self.jupyter in (True, False):
+            bar = alive_it(range(page_start, max_page), force_tty=self.jupyter)
+        else:
+            bar = alive_it(range(page_start, max_page))
         file_count = 0
         for page in bar:
             bar.text(f"Processing page{page} of {max_page-1}")

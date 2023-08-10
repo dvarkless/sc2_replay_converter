@@ -1,12 +1,11 @@
 import logging
+import sys
 from datetime import datetime
 from time import strftime, strptime
-import sys
 
 import psycopg2 as pgsql
-from psycopg2 import sql
-
 from config import get_config
+from psycopg2 import sql
 from setup_handler import get_handler
 
 
@@ -262,12 +261,33 @@ class GameInfo(DB):
             raise ValueError(f"returning game_id = {game_id}")
         return game_id[0]
 
+    def update_path(self, game_id, replay_path):
+        to_upload = {
+            "game_id": game_id,
+            "replay_path": str(replay_path),
+        }
+        self.query = self.db_config["update_path_file"]
+        self._exec_update(self.query, to_upload)
+
     def get(self, args: tuple):
         if args:
             query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
         else:
             query = f"SELECT * FROM {self.name};"
         self._exec_query_many(query, args)
+
+    def get_id_if_exists(self, players_hash, timestamp_played):
+        timestamp_played = pgsql.TimestampFromTicks(timestamp_played)
+        to_upload = {
+            "players_hash": players_hash,
+            "timestamp_played": timestamp_played,
+        }
+        self.query = self.db_config["select_game_id_file"]
+        out = self._exec_query_one(
+            self.query,
+            to_upload,
+        )
+        return out[0] if out is not None else out
 
 
 class PlayerInfo(DB):

@@ -64,6 +64,7 @@ class ReplayFilter:
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(get_handler())
         self.logger.setLevel(logging.DEBUG)
+        self.report = "No report to show, please call this instance"
 
     def get_valid_types(self, name):
         assert hasattr(self, name)
@@ -249,7 +250,7 @@ class ReplayFilter:
             self.passed_filters[i] = check_method(replay_dict)
         self.report = "\n".join(
             [
-                f"{name}==>{val}"
+                f"{'! '*val}{name}==>{'Pass' if val else 'Fail'}"
                 for name, val in zip(self._list_filters, self.passed_filters)
             ]
         )
@@ -389,6 +390,10 @@ class ReplayProcess:
             out = db.put(**to_upload_dict)
         return out
 
+    def game_id_if_exists(self, players_hash, timestamp_played):
+        with self.game_info_db:
+            return self.game_info_db.get_id_if_exists(players_hash, timestamp_played)
+
     def process_replays(self, replay_dir, filt=None):
         replay_dir = Path(replay_dir)
         list_file = [p for p in replay_dir.iterdir() if p.suffix == ".SC2Replay"]
@@ -411,10 +416,22 @@ class ReplayProcess:
                     self.logger.info(info)
                     print(info)
                     continue
-            self.upload_map_info(replay)
-            self.upload_player_info(replay)
-            id = self.upload_game_info(replay, replay_path)
-            self.upload_build_order(replay, id, bar=bar)
+
+            players_hash = replay.players_hash
+            timestamp_played = int(replay.replay.date.timestamp())
+
+            game_id = self.game_id_if_exists(players_hash, timestamp_played)
+            if game_id is None:
+                self.upload_map_info(replay)
+                self.upload_player_info(replay)
+                id = self.upload_game_info(replay, replay_path)
+                self.upload_build_order(replay, id, bar=bar)
+            else:
+                with self.game_info_db:
+                    self.game_info_db.update_path(game_id, replay_path)
+                info = "Replay skipped, reason:\nAlready exists in the db (path updated)"
+                self.logger.info(info)
+                print(info)
 
 
 if __name__ == "__main__":
@@ -428,4 +445,4 @@ if __name__ == "__main__":
         "./starcraft2_replay_parse/game_info.csv",
         ticks_per_pos=48,
     )
-    processor.process_replays("./replays", filt=replay_filter)
+    processor.process_replays("../replay_data_sample/", filt=replay_filter)

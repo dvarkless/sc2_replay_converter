@@ -1,10 +1,12 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from alive_progress import alive_it
-
 from database_access import BuildOrder, GameInfo, MapInfo, PlayerInfo
+from setup_handler import get_handler
+
 from starcraft2_replay_parse.replay_tools import BuildOrderData, ReplayData
 
 
@@ -59,12 +61,17 @@ class ReplayFilter:
             setattr(self, filter_name, None)
 
         self.passed_filters = [True for i in self._list_filters]
+        self.logger = logging.getLogger(__name__)
+        self.logger.addHandler(get_handler())
+        self.logger.setLevel(logging.DEBUG)
 
     def get_valid_types(self, name):
         assert hasattr(self, name)
         types_dict = getattr(self, f"_{name}_types")
         disable_type = types_dict["disable"]
-        print(f"Disable keyword = '{disable_type}'")
+        to_print = f"Disable keyword = '{disable_type}'"
+        print(to_print)
+        self.logger.info(to_print)
         valid = types_dict["valid"]
         for v_type in valid:
             if isinstance(v_type, dict):
@@ -81,8 +88,10 @@ class ReplayFilter:
                 if comments:
                     str_out += f"\n\t({comments})"
                 print(str_out)
+                self.logger.info(str_out)
             else:
-                print(f"Valid type = '{valid}'")
+                print(to_print)
+                self.logger.info(to_print)
 
     def is_val_matches(self, val, v_type):
         root_type = v_type["root"]
@@ -115,6 +124,8 @@ class ReplayFilter:
                     else:
                         if not isinstance(val, v_type):
                             bad_finish = True
+                        else:
+                            break
         if not bad_finish:
             print(f"For filter '{name}' selected action is '{key}' ({val})")
             return val
@@ -148,7 +159,7 @@ class ReplayFilter:
 
     @property
     def is_1v1(self):
-        return self._is_ladder
+        return self._is_1v1
 
     @is_1v1.setter
     def is_1v1(self, val):
@@ -206,7 +217,7 @@ class ReplayFilter:
     def check_is_1v1(self, replay_dict):
         if self.is_1v1 == self._is_1v1_types["disable"]:
             return True
-        return replay_dict["game_mode"] == "1v1"
+        return replay_dict["mode"] == "1v1"
 
     def check_has_race(self, replay_dict):
         if self.has_race == self._has_race_types["disable"]:
@@ -253,7 +264,7 @@ class ReplayProcess:
         game_data_path,
         max_tick=28800,
         ticks_per_pos=32,
-        jupyter=False,
+        jupyter=None,
     ) -> None:
         self.game_info_db = GameInfo(secrets_path, db_config)
         self.build_order_db = BuildOrder(secrets_path, db_config)
@@ -270,9 +281,14 @@ class ReplayProcess:
         self.build_order_cls = BuildOrderData(max_tick, ticks_per_pos, game_data_path)
         self.game_data = pd.read_csv(game_data_path, index_col="name")
         self.jupyter = jupyter
+        self.logger = logging.getLogger(__name__)
+        self.logger.addHandler(get_handler())
+        self.logger.setLevel(logging.DEBUG)
 
     def init_dbs(self):
         for db in self.dbs:
+            # with db:
+            #     db.drop()
             with db:
                 db.create_table()
 
@@ -326,10 +342,15 @@ class ReplayProcess:
 
     def upload_player_info(self, replay):
         replay_data = replay.as_dict()
+        forbidden_symbols = "%<>&;"
         for name in replay.player_names:
+            if any(s in name for s in forbidden_symbols):
+                nickname = "||||||||||||"
+            else:
+                nickname = name
             player_info = {
                 "player_id": replay_data["players_data"][name]["id"],
-                "nickname": name,
+                "nickname": nickname,
                 "race": replay_data["players_data"][name]["race"][0].lower(),
                 "league_int": replay_data["players_data"][name]["league"],
                 "is_win": name in replay_data["winners"],
@@ -371,13 +392,24 @@ class ReplayProcess:
     def process_replays(self, replay_dir, filt=None):
         replay_dir = Path(replay_dir)
         list_file = [p for p in replay_dir.iterdir() if p.suffix == ".SC2Replay"]
-        bar = alive_it(list_file, force_tty=self.jupyter)
+        if self.jupyter in (True, False):
+            bar = alive_it(list_file, force_tty=self.jupyter)
+        else:
+            bar = alive_it(list_file)
 
         for replay_path in bar:
-            replay = ReplayData().parse_replay(replay_path)
+            try:
+                replay = ReplayData().parse_replay(replay_path)
+            except Exception as e:
+                print(f"Replay skipped, reason:\n{e}")
+                self.logger.error(f"Replay skipped, reason:\n{e}")
+                continue
+
             if filt is not None:
                 if not filt(replay):
-                    print(filt.report)
+                    info = f"Replay skipped, reason: \nStopped by filter: {filt.report}"
+                    self.logger.info(info)
+                    print(info)
                     continue
             self.upload_map_info(replay)
             self.upload_player_info(replay)
@@ -394,5 +426,6 @@ if __name__ == "__main__":
         "./configs/secrets.yml",
         "configs/database.yml",
         "./starcraft2_replay_parse/game_info.csv",
+        ticks_per_pos=48,
     )
-    processor.process_replays("./replays/", filt=replay_filter)
+    processor.process_replays("./replays", filt=replay_filter)

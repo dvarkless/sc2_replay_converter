@@ -9,7 +9,7 @@ import requests
 from alive_progress import alive_it
 from bs4 import BeautifulSoup
 
-from config import Config
+from config import get_config
 
 
 async def download_files(files_list, destination, website_name, page=0):
@@ -39,12 +39,14 @@ class ReplayDownloader:
         destination_path,
         config_path,
         max_count: int = -1,
+        jupyter=False,
     ) -> None:
-        self.config = Config(config_path)
+        self.config = get_config(config_path)
         self.max_count = max_count if max_count > 0 else 10e5
         self.change_destination(destination_path)
         self.success_urls = []
         self.failed_urls = []
+        self.jupyter = jupyter
 
     def start_download(
         self,
@@ -73,7 +75,8 @@ class ReplayDownloader:
         )
         page_start = self.config[self.website_name]["keys"]["page_start"]
         max_page = self._get_max_pages(init_soup)
-        bar = alive_it(range(page_start, max_page))
+        bar = alive_it(range(page_start, max_page), force_tty=self.jupyter)
+        file_count = 0
         for page in bar:
             bar.text(f"Processing page{page} of {max_page-1}")
             init_soup = self._get_parsed_site(
@@ -91,11 +94,18 @@ class ReplayDownloader:
                 if game_len > game_min_length
                 if game_len < game_max_length
             ]
+            page_count = len(files_list)
+            diff_count = self.max_count - file_count
+            if diff_count < page_count:
+                files_list = files_list[: diff_count - 1]
 
             asyncio.run(
                 download_files(files_list, self.destination, self.website_name, page)
             )
             page += self.config[self.website_name]["keys"]["page_increment"]
+            file_count += page_count
+            if diff_count < page_count:
+                break
 
     def _get_max_pages(self, soup) -> int:
         if self.website_name == "spawningtool":

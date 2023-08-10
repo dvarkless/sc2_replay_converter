@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from time import strftime, strptime
+import sys
 
 import psycopg2 as pgsql
 from psycopg2 import sql
@@ -117,14 +118,18 @@ class DB(metaclass=Singleton):
         try:
             self.cur.execute(query)
         except pgsql.ProgrammingError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn.rollback()
         except pgsql.InterfaceError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn = self._get_connection()
             self.cur = self.conn.cursor()
+        except Exception as e:
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
+            sys.exit()
 
         self.logger.debug(self.last_query)
         out = None
@@ -133,6 +138,7 @@ class DB(metaclass=Singleton):
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.warning(e)
+        self.logger.debug(f"Output: {out}")
         return out if out else None
 
     def _exec_query_many(self, query, kwargs):
@@ -141,14 +147,18 @@ class DB(metaclass=Singleton):
         try:
             self.cur.execute(query)
         except pgsql.ProgrammingError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn.rollback()
         except pgsql.InterfaceError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn = self._get_connection()
             self.cur = self.conn.cursor()
+        except Exception as e:
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
+            sys.exit()
         self.logger.debug(self.last_query)
         while True:
             item = None
@@ -157,6 +167,7 @@ class DB(metaclass=Singleton):
             except pgsql.ProgrammingError as e:
                 print(e)
                 self.logger.warning(e)
+            self.logger.debug(f"Output: {item}")
             yield item if item is not None else StopIteration
 
     def _exec_insert(self, query, kwargs):
@@ -165,14 +176,19 @@ class DB(metaclass=Singleton):
         try:
             self.cur.execute(query)
         except pgsql.ProgrammingError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn.rollback()
         except pgsql.InterfaceError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn = self._get_connection()
             self.cur = self.conn.cursor()
+        except Exception as e:
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
+            sys.exit()
+
         self.logger.debug(self.last_query)
 
     def _exec_update(self, query, kwargs):
@@ -181,15 +197,18 @@ class DB(metaclass=Singleton):
         try:
             self.cur.execute(query)
         except pgsql.ProgrammingError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn.rollback()
         except pgsql.InterfaceError as e:
-            print(e)
-            self.logger.error(e)
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             self.conn = self._get_connection()
             self.cur = self.conn.cursor()
-        self.logger.debug(self.last_query)
+        except Exception as e:
+            print(f"Error:{e} \nAT QUERY: '{query}'")
+            self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
+            sys.exit()
 
     def put(self, args):
         raise NotImplementedError
@@ -311,13 +330,12 @@ class PlayerInfo(DB):
             get_args_dict["highest_league"], league_int
         )
 
-        query = open(self.db_config["insert_file"]).read()
         if val_exists:
             self.query = self.db_config["update_file"]
-            self._exec_update(query, get_args_dict)
+            self._exec_update(self.query, get_args_dict)
         else:
             self.query = self.db_config["insert_file"]
-            self._exec_insert(query, get_args_dict)
+            self._exec_insert(self.query, get_args_dict)
 
     def get(self, args):
         if args:

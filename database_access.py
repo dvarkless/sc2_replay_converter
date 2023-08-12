@@ -4,8 +4,9 @@ from datetime import datetime
 from time import strftime, strptime
 
 import psycopg2 as pgsql
-from config import get_config
 from psycopg2 import sql
+
+from config import get_config
 from setup_handler import get_handler
 
 
@@ -212,8 +213,9 @@ class DB(metaclass=Singleton):
     def put(self, args):
         raise NotImplementedError
 
-    def get(self, args):
-        raise NotImplementedError
+    def get(self):
+        self.query = self.db_config["select_all"]
+        self._exec_query_many(self.query, dict())
 
 
 class GameInfo(DB):
@@ -268,13 +270,6 @@ class GameInfo(DB):
         }
         self.query = self.db_config["update_path_file"]
         self._exec_update(self.query, to_upload)
-
-    def get(self, args: tuple):
-        if args:
-            query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
-        else:
-            query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, args)
 
     def get_id_if_exists(self, players_hash, timestamp_played):
         timestamp_played = pgsql.TimestampFromTicks(timestamp_played)
@@ -357,13 +352,6 @@ class PlayerInfo(DB):
             self.query = self.db_config["insert_file"]
             self._exec_insert(self.query, get_args_dict)
 
-    def get(self, args):
-        if args:
-            query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
-        else:
-            query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, args)
-
 
 class MapInfo(DB):
     def __init__(self, secrets_path: str, db_config_path: str):
@@ -403,13 +391,6 @@ class MapInfo(DB):
             self.query = self.db_config["insert_file"]
             self._exec_insert(self.query, get_args_dict)
 
-    def get(self, args):
-        if args:
-            query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
-        else:
-            query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, args)
-
 
 class BuildOrder(DB):
     def __init__(self, secrets_path: str, db_config_path: str):
@@ -420,9 +401,62 @@ class BuildOrder(DB):
         self.query = self.db_config["insert_file"]
         self._exec_insert(self.query, col_data)
 
-    def get(self, args):
-        if args:
-            query = f"SELECT ({', '.join(['%s' for _ in args])}) FROM {self.name};"
-        else:
-            query = f"SELECT * FROM {self.name};"
-        self._exec_query_many(query, args)
+
+class MatchupDB(DB):
+    def __init__(self, table_name, secrets_path: str, db_config_path: str):
+        super().__init__(secrets_path)
+        self._set_attrs(db_config_path, table_name)
+
+    def put(self, **col_data):
+        self.query = self.db_config["insert_file"]
+        self._exec_insert(self.query, col_data)
+
+    def get_id(self, game_id):
+        to_pass = {"game_id": game_id}
+        self.query = self.db_config["select_where_id"]
+        self._exec_query_many(self.query, to_pass)
+
+
+class ZvTComp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvt_comp", secrets_path, db_config_path)
+
+
+class ZvPComp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvp_comp", secrets_path, db_config_path)
+
+
+class ZvZComp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvz_comp", secrets_path, db_config_path)
+
+
+class ZvTWinprob(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvt_winprob", secrets_path, db_config_path)
+
+
+class ZvPWinprob(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvp_winprob", secrets_path, db_config_path)
+
+
+class ZvZWinprob(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvz_winprob", secrets_path, db_config_path)
+
+
+class ZvTEnemycomp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvt_enemycomp", secrets_path, db_config_path)
+
+
+class ZvPEnemycomp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvp_enemycomp", secrets_path, db_config_path)
+
+
+class ZvZEnemycomp(MatchupDB):
+    def __init__(self, secrets_path: str, db_config_path: str):
+        super().__init__("zvz_enemycomp", secrets_path, db_config_path)

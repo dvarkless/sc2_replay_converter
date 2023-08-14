@@ -421,29 +421,21 @@ class BuildOrder(DB):
 
     def get(self):
         self.query = self.db_config["select_file"]
-        self._exec_query_many(self.query, {})
+        return self._exec_query_many(self.query, {})
+
+    def get_by_keys(self, game_id, tick):
+        to_upload = {
+            "game_id": game_id,
+            "tick": tick,
+        }
+        self.query = self.db_config["select_by_keys"]
+        return self._exec_query_one(self.query, to_upload)
 
 
 class MatchupDB(DB):
     def __init__(self, table_name, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, table_name)
-
-    def _format_entity_dict(self, entity_dict, prefix="p"):
-        entity_dict = entity_dict.copy()
-        for key, val in entity_dict.items():
-            new_key = prefix + "_" + key
-            entity_dict[new_key] = val
-            del entity_dict[key]
-        return entity_dict
-
-    def _get_formatted_dicts(
-        self, player_entities: dict, enemy_entities: dict, out_entities: dict
-    ):
-        player_entities = self._format_entity_dict(player_entities, "p")
-        enemy_entities = self._format_entity_dict(enemy_entities, "e")
-        out_entities = self._format_entity_dict(out_entities, "out")
-        return player_entities, enemy_entities, out_entities
 
     def construct_create_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict

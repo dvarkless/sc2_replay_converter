@@ -39,6 +39,7 @@ build_order:
   get_columns_file: "./queries/get_columns.sql"
   insert_file: "./queries/insert_build_order.sql"
   select_file: "./queries/select_all.sql"
+  select_by_keys: "./queries/select_by_keys_build_order.sql"
   get_tables_file: "./queries/get_tables.sql"
   drop_table_file: "./queries/drop_table.sql"
 

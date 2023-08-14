@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS game_info(
 game_id SERIAL PRIMARY KEY,
-timestamp_played TIMESTAMP NOT NULL,
+Timestamp_played TIMESTAMP NOT NULL,
 date_processed DATE,
 players_hash VARCHAR(64) NOT NULL,
 end_time INTEGER CHECK (end_time > 0),

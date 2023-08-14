@@ -21,16 +21,23 @@ class Singleton(type):
 
 
 class DB(metaclass=Singleton):
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, db_return_type=None):
         self.config = get_config(config_path)
+        self.db_return_type = db_return_type
         self.logger = logging.getLogger(__name__)
         self.logger.addHandler(get_handler())
         self.logger.setLevel(logging.DEBUG)
 
     def __enter__(self):
         self.conn = self._get_connection()
+        cur_factory = None
+        if self.db_return_type == "dict":
+            cur_factory = DictCursor
         try:
-            self.cur = self.conn.cursor()
+            if cur_factory is not None:
+                self.cur = self.conn.cursor(cursor_factory=cur_factory)
+            else:
+                self.cur = self.conn.cursor()
         except (Exception, pgsql.DatabaseError) as error:
             print(f"Critical: {error}")
             self.logger.critical(error)
@@ -81,8 +88,7 @@ class DB(metaclass=Singleton):
     def _compose_query(self, query):
         if "{}" in query:
             return sql.SQL(query).format(sql.Identifier(self.name))
-        else:
-            return sql.SQL(query)
+        return sql.SQL(query)
 
     def drop(self):
         self.query = self.db_config["drop_table_file"]
@@ -93,10 +99,12 @@ class DB(metaclass=Singleton):
         self.query = self.db_config["get_columns_file"]
         return self._exec_query_one(self.query, {})
 
-    def create_table(self):
-        query_path = self.db_config["create_table_file"]
+    def create_table(self, query=None):
+        if query is None:
+            query_path = self.db_config["create_table_file"]
+            query = open(query_path).read()
         try:
-            self.cur.execute(open(query_path).read())
+            self.cur.execute(query)
         except pgsql.ProgrammingError as e:
             print(e)
             self.logger.error(e)
@@ -283,7 +291,11 @@ class GameInfo(DB):
             self.query,
             to_upload,
         )
-        return out[0] if out is not None else out
+        if self.db_return_type == "dict":
+            result_id = out["game_id"] if out is not None else None
+        else:
+            result_id = out[0] if out is not None else None
+        return result_id if out is not None else None
 
     def get_players_info(self, game_id):
         self.query = self.db_config["select_player"]
@@ -400,17 +412,21 @@ class MapInfo(DB):
 
 class BuildOrder(DB):
     def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__(secrets_path)
+        super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, "build_order")
 
     def put(self, **col_data):
         self.query = self.db_config["insert_file"]
         self._exec_insert(self.query, col_data)
 
+    def get(self):
+        self.query = self.db_config["select_file"]
+        self._exec_query_many(self.query, {})
+
 
 class MatchupDB(DB):
     def __init__(self, table_name, secrets_path: str, db_config_path: str):
-        super().__init__(secrets_path)
+        super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, table_name)
 
     def _format_entity_dict(self, entity_dict, prefix="p"):
@@ -442,7 +458,7 @@ class MatchupDB(DB):
         template_query = open(
             self.db_config["create_table_file"], encoding="utf-8"
         ).read()
-        query = template_query.format(cols=query)
+        query = template_query.format(self.name, cols=query)
         return query
 
     def construct_insert_query(
@@ -457,17 +473,36 @@ class MatchupDB(DB):
         template_query = open(
             self.db_config["create_table_file"], encoding="utf-8"
         ).read()
-        query = template_query.format(cols=input_query, formatted_cols=get_query)
+        query = template_query.format(
+            self.name, cols=input_query, formatted_cols=get_query
+        )
         return query
 
-    def put(self, **col_data):
-        self.query = self.db_config["insert_file"]
-        self._exec_insert(self.query, col_data)
+    def create_table(
+        self, player_entities: dict, enemy_entities: dict, out_entities: dict
+    ):
+        query = self.construct_create_query(
+            player_entities, enemy_entities, out_entities
+        )
+        return super().create_table(query=query)
+
+    def put(self, player_entities: dict, enemy_entities: dict, out_entities: dict):
+        query = self.construct_insert_query(
+            player_entities, enemy_entities, out_entities
+        )
+        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
+            player_entities, enemy_entities, out_entities
+        )
+        self._exec_insert(query, player_entities | enemy_entities | out_entities)
 
     def get_id(self, game_id):
         to_pass = {"game_id": game_id}
         self.query = self.db_config["select_where_id"]
         self._exec_query_many(self.query, to_pass)
+
+    def get(self):
+        self.query = self.db_config["select_file"]
+        self._exec_query_many(self.query, {})
 
 
 class IntertableQueries(DB):

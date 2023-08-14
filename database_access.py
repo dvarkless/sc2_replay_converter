@@ -5,6 +5,7 @@ from time import strftime, strptime
 
 import psycopg2 as pgsql
 from psycopg2 import sql
+from psycopg2.extras import DictCursor
 
 from config import get_config
 from setup_handler import get_handler
@@ -284,6 +285,11 @@ class GameInfo(DB):
         )
         return out[0] if out is not None else out
 
+    def get_players_info(self, game_id):
+        self.query = self.db_config["select_player"]
+        out = self._exec_query_one(self.query, {"game_id": game_id})
+        return out
+
 
 class PlayerInfo(DB):
     def __init__(self, secrets_path: str, db_config_path: str):
@@ -407,6 +413,53 @@ class MatchupDB(DB):
         super().__init__(secrets_path)
         self._set_attrs(db_config_path, table_name)
 
+    def _format_entity_dict(self, entity_dict, prefix="p"):
+        entity_dict = entity_dict.copy()
+        for key, val in entity_dict.items():
+            new_key = prefix + "_" + key
+            entity_dict[new_key] = val
+            del entity_dict[key]
+        return entity_dict
+
+    def _get_formatted_dicts(
+        self, player_entities: dict, enemy_entities: dict, out_entities: dict
+    ):
+        player_entities = self._format_entity_dict(player_entities, "p")
+        enemy_entities = self._format_entity_dict(enemy_entities, "e")
+        out_entities = self._format_entity_dict(out_entities, "out")
+        return player_entities, enemy_entities, out_entities
+
+    def construct_create_query(
+        self, player_entities: dict, enemy_entities: dict, out_entities: dict
+    ):
+        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
+            player_entities, enemy_entities, out_entities
+        )
+        input_entities = player_entities | enemy_entities
+        query = ",\n".join((f"{name} INTEGER" for name in input_entities.keys()))
+        query += ",\n"
+        query += ",\n".join((f"{name} NUMERIC(4, 3)" for name in out_entities.keys()))
+        template_query = open(
+            self.db_config["create_table_file"], encoding="utf-8"
+        ).read()
+        query = template_query.format(cols=query)
+        return query
+
+    def construct_insert_query(
+        self, player_entities: dict, enemy_entities: dict, out_entities: dict
+    ):
+        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
+            player_entities, enemy_entities, out_entities
+        )
+        entities = player_entities | enemy_entities | out_entities
+        input_query = ", ".join((f"{name}" for name in entities.keys()))
+        get_query = ", ".join((f"%({name})s" for name in entities.keys()))
+        template_query = open(
+            self.db_config["create_table_file"], encoding="utf-8"
+        ).read()
+        query = template_query.format(cols=input_query, formatted_cols=get_query)
+        return query
+
     def put(self, **col_data):
         self.query = self.db_config["insert_file"]
         self._exec_insert(self.query, col_data)
@@ -417,46 +470,7 @@ class MatchupDB(DB):
         self._exec_query_many(self.query, to_pass)
 
 
-class ZvTComp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvt_comp", secrets_path, db_config_path)
-
-
-class ZvPComp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvp_comp", secrets_path, db_config_path)
-
-
-class ZvZComp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvz_comp", secrets_path, db_config_path)
-
-
-class ZvTWinprob(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvt_winprob", secrets_path, db_config_path)
-
-
-class ZvPWinprob(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvp_winprob", secrets_path, db_config_path)
-
-
-class ZvZWinprob(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvz_winprob", secrets_path, db_config_path)
-
-
-class ZvTEnemycomp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvt_enemycomp", secrets_path, db_config_path)
-
-
-class ZvPEnemycomp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvp_enemycomp", secrets_path, db_config_path)
-
-
-class ZvZEnemycomp(MatchupDB):
-    def __init__(self, secrets_path: str, db_config_path: str):
-        super().__init__("zvz_enemycomp", secrets_path, db_config_path)
+class IntertableQueries(DB):
+    def __init__(self, secret_path: str, config_path: str):
+        super().__init__(config_path)
+        self._set_attrs(config_path, "intertable_queries")

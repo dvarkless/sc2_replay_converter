@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 from alive_progress import alive_it
+
 from database_access import BuildOrder, GameInfo, MapInfo, PlayerInfo
 from setup_handler import get_handler
-
 from starcraft2_replay_parse.replay_tools import BuildOrderData, ReplayData
 
 
@@ -118,7 +118,7 @@ class ReplayFilter:
         for key, types in my_types.items():
             if val is types:
                 break
-            elif isinstance(types, list):
+            if isinstance(types, list):
                 for v_type in types:
                     if isinstance(v_type, dict):
                         bad_finish = not self.is_val_matches(val, v_type)
@@ -130,9 +130,8 @@ class ReplayFilter:
         if not bad_finish:
             print(f"For filter '{name}' selected action is '{key}' ({val})")
             return val
-        else:
-            print(f"Bad value for '{name}' ({val}), setting to 'disable'")
-            return my_types["disable"]
+        print(f"Bad value for '{name}' ({val}), setting to 'disable'")
+        return my_types["disable"]
 
     @property
     def is_ladder(self):
@@ -200,8 +199,7 @@ class ReplayFilter:
             return True
         if isinstance(self.league, list):
             return replay_dict["league"] in self.league
-        else:
-            return replay_dict["league"] == self.league
+        return replay_dict["league"] == self.league
 
     def check_time_played(self, replay_dict):
         if self.time_played == self._time_played_types["disable"]:
@@ -209,11 +207,9 @@ class ReplayFilter:
         replay_date = replay_dict["date"]
         if isinstance(self.time_played, list):
             return (
-                replay_date >= self.time_played[0]
-                and replay_date <= self.time_played[1]
+                self.time_played[0] <= replay_date <= self.time_played[1]
             )
-        else:
-            return replay_date >= self.time_played
+        return replay_date >= self.time_played
 
     def check_is_1v1(self, replay_dict):
         if self.is_1v1 == self._is_1v1_types["disable"]:
@@ -239,8 +235,7 @@ class ReplayFilter:
         replay_len = replay_dict["frames"]
         if isinstance(self.game_len, list):
             return replay_len >= self.game_len[0] and replay_len <= self.game_len[1]
-        else:
-            return replay_len >= self.game_len
+        return replay_len >= self.game_len
 
     def __call__(self, replay):
         replay_dict = replay.as_dict()
@@ -314,7 +309,9 @@ class ReplayProcess:
         game_info["player_1_league"] = replay_data["players_data"][player_1_name][
             "league"
         ]
-        game_info["player_1_winner"] = replay_data["players_data"][player_1_name]["is_winner"]
+        game_info["player_1_winner"] = replay_data["players_data"][player_1_name][
+            "is_winner"
+        ]
         game_info["player_2_id"] = replay_data["players_data"][player_2_name]["id"]
         game_info["player_2_race"] = replay_data["players_data"][player_2_name]["race"][
             0
@@ -322,7 +319,9 @@ class ReplayProcess:
         game_info["player_2_league"] = replay_data["players_data"][player_2_name][
             "league"
         ]
-        game_info["player_2_winner"] = replay_data["players_data"][player_2_name]["is_winner"]
+        game_info["player_2_winner"] = replay_data["players_data"][player_2_name][
+            "is_winner"
+        ]
         game_info["map_hash"] = replay.map_hash
         game_info["matchup"] = replay_data["matchup"]
         game_info["is_ladder"] = replay.is_ranked
@@ -431,7 +430,9 @@ class ReplayProcess:
             else:
                 with self.game_info_db:
                     self.game_info_db.update_path(game_id, replay_path)
-                info = "Replay skipped, reason:\nAlready exists in the db (path updated)"
+                info = (
+                    "Replay skipped, reason:\nAlready exists in the db (path updated)"
+                )
                 self.logger.info(info)
                 print(info)
 

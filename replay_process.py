@@ -314,6 +314,7 @@ class ReplayProcess:
         game_info["player_1_league"] = replay_data["players_data"][player_1_name][
             "league"
         ]
+        game_info["player_1_winner"] = replay_data["players_data"][player_1_name]["is_winner"]
         game_info["player_2_id"] = replay_data["players_data"][player_2_name]["id"]
         game_info["player_2_race"] = replay_data["players_data"][player_2_name]["race"][
             0
@@ -321,6 +322,7 @@ class ReplayProcess:
         game_info["player_2_league"] = replay_data["players_data"][player_2_name][
             "league"
         ]
+        game_info["player_2_winner"] = replay_data["players_data"][player_2_name]["is_winner"]
         game_info["map_hash"] = replay.map_hash
         game_info["matchup"] = replay_data["matchup"]
         game_info["is_ladder"] = replay.is_ranked

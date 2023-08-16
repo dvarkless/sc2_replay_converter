@@ -8,22 +8,32 @@ from database_access import BuildOrder, GameInfo, MatchupDB, PlayerInfo
 from replay_process import ReplayFilter
 
 
-class FilterRace:
-    def __init__(self, player: str, enemy: str) -> None:
+class ReorganizePlayers:
+    def __init__(self, player: str, enemy: str, min_league: int, include_unranked=True) -> None:
         self.player = player
         self.enemy = enemy
+        self.min_league = min_league
+        self.include_unranked = include_unranked
 
     def check_matchup(self, player_race, enemy_race):
         if player_race == self.player and enemy_race == self.enemy:
             return True
         return False
 
+    def check_league(self, player_data):
+        player_league = player_data["league"]
+        if self.include_unranked:
+            return bool(player_league >= self.min_league or player_league == 0)
+        return bool(player_league >= self.min_league)
+
     def transform(self, data_dict):
         p1r, p1w = data_dict["player_1"]["race"], data_dict["player_1"]["is_win"]
         p2r, p2w = data_dict["player_2"]["race"], data_dict["player_2"]["is_win"]
-        if self.check_matchup(p1r, p2r):
+        p1_pass = self.check_league(data_dict["player_1"])
+        p2_pass = self.check_league(data_dict["player_2"])
+        if self.check_matchup(p1r, p2r) and p1_pass:
             return (True, "player_1", p1w)
-        if self.check_matchup(p2r, p1r):
+        if self.check_matchup(p2r, p1r) and p2_pass:
             return (True, "player_2", p2w)
         return (False, "player_1", p1w)
 
@@ -54,22 +64,20 @@ class RandomPoints:
     def get_final_points(self, starting_points, end_val, tick_step):
         end_val = int(end_val // tick_step * tick_step)
         final_points = []
-        for point in starting_points:
-            final_point = point + self.final_point_step
-            final_point = int(final_point // tick_step * tick_step)
-            final_point = min(final_point, end_val)
-            final_points.append(point)
+        if self.get_final_point:
+            for point in starting_points:
+                final_point = point + self.final_point_step
+                final_point = int(final_point // tick_step * tick_step)
+                final_point = min(final_point, end_val)
+                final_points.append(point)
         return final_points
 
     def transform(self, end_val):
-        if self.get_final_point:
-            out_points = self.get_random_ticks(
-                end_val, self.tick_step, constrained=True
-            )
-            final_points = self.get_final_points(out_points, end_val, self.tick_step)
-            return (out_points, final_points)
-        out_points = self.get_random_ticks(end_val, self.tick_step, constrained=False)
-        return (out_points,)
+        out_points = self.get_random_ticks(
+            end_val, self.tick_step, constrained=self.get_final_point
+        )
+        final_points = self.get_final_points(out_points, end_val, self.tick_step)
+        return (out_points, final_points)
 
 
 class NormalizeColumns:
@@ -95,6 +103,7 @@ class NormalizeColumns:
         include_upgrades=False,
         include_special=False,
         include_tick=False,
+        include_units=True,
     ):
         self.player = player
         self.r = r
@@ -102,8 +111,10 @@ class NormalizeColumns:
         self.include_upgrades = include_upgrades
         self.include_special = include_special
         self.include_tick = include_tick
+        self.include_units = include_units
 
     def filter_columns(self, data):
+        # ("player_N_column", int_val)
         pairs = list(data.items())
         # Example:
         # Pass if player_1 in player_1_Drone
@@ -112,6 +123,8 @@ class NormalizeColumns:
         pairs = [(pair[0].removeprefix(self.player + "_"), pair[1]) for pair in pairs]
         # Pass if Drone in zerg units
         df = self._filter_race(self.game_info, self.r)
+        if not self.include_units:
+            df = self._filter_units(df)
         if not self.include_buildings:
             df = self._filter_buildings(df)
         if not self.include_upgrades:
@@ -128,6 +141,10 @@ class NormalizeColumns:
 
     def _filter_race(self, df, race):
         df = df[df.loc[:, "race"] == race]
+        return df
+
+    def _filter_units(self, df):
+        df = df[df.loc[:, "type"] != "Unit"]
         return df
 
     def _filter_upgrades(self, df):
@@ -157,18 +174,35 @@ class CalcWinprob:
         return 1 / (1 + exp(-arg))
 
 
-class CeilOutput:
+class DensityVals:
     def __init__(
         self,
+        supply_data_file,
     ) -> None:
-        pass
+        self.supply_data = pd.read_csv(supply_data_file, index_col="name")
+
+    def ceil(self, data):
+        for key, val in data.items():
+            if key in self.supply_data.index:
+                if isinstance(val, int):
+                    data[key] = max(val, 0)
+                elif isinstance(val, float):
+                    data[key] = max(val, 0.0)
+        return data
+
+    def _get_sum(self, data):
+        sum = 0
+        for key, val in data.items():
+            if key in self.supply_data.index:
+                sum += val
+        return sum
 
     def transform(self, data):
+        units_sum = self._get_sum(data)
+        new_dict = {}
         for key, val in data.items():
-            if isinstance(val, int):
-                data[key] = max(val, 0)
-            elif isinstance(val, float):
-                data[key] = max(val, 0.0)
+            new_dict[key] = val/units_sum
+        return self.ceil(new_dict)
 
 
 class Extractor:
@@ -185,16 +219,18 @@ class Extractor:
 
     def extract_data(self, game_id):
         with self.game_info_db as db:
-            end_tick, p1r, p1w, p2r, p2w = db.get_players_info(game_id)
+            end_tick, p1r, p1w, p1l, p2r, p2w, p2l = db.get_players_info(game_id)
             data = {
                 "end_tick": end_tick,
                 "player_1": {
                     "is_win": p1w,
                     "race": p1r,
+                    "league": p1l,
                 },
                 "player_2": {
                     "is_win": p2w,
                     "race": p2r,
+                    "league": p2l,
                 },
             }
         return data
@@ -223,7 +259,6 @@ class Loader:
         self.db_config_path = db_config_path
         self.player_r = player_r
         self.enemy_r = enemy_r
-        self.table_type = table_type
         self.table_name = f"{player_r}v{enemy_r}_{table_type}"
 
         self.db = self.get_init_table()
@@ -255,18 +290,6 @@ class Loader:
         player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
             player_entities, enemy_entities, out_entities
         )
-        if self.table_type == "comp":
-            self.upload_comp()
-        if self.table_type == "winprob":
-            self.upload_winprob()
-        if self.table_type == "enemycomp":
-            self.upload_enemycomp()
 
-    def upload_comp(self, player_data, enemy_data, out_data):
-        pass
-
-    def upload_winprob(self, player_data, enemy_data, out_data):
-        pass
-
-    def upload_enemycomp(self, enemy_data, out_data):
-        pass
+        with self.db as db:
+            db.put(player_entities, enemy_entities, out_entities)

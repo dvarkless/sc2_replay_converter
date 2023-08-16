@@ -440,9 +440,6 @@ class MatchupDB(DB):
     def construct_create_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
-        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
-            player_entities, enemy_entities, out_entities
-        )
         input_entities = player_entities | enemy_entities
         query = ",\n".join((f"{name} INTEGER" for name in input_entities.keys()))
         query += ",\n"
@@ -456,9 +453,6 @@ class MatchupDB(DB):
     def construct_insert_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
-        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
-            player_entities, enemy_entities, out_entities
-        )
         entities = player_entities | enemy_entities | out_entities
         input_query = ", ".join((f"{name}" for name in entities.keys()))
         get_query = ", ".join((f"%({name})s" for name in entities.keys()))
@@ -482,9 +476,6 @@ class MatchupDB(DB):
         query = self.construct_insert_query(
             player_entities, enemy_entities, out_entities
         )
-        player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
-            player_entities, enemy_entities, out_entities
-        )
         self._exec_insert(query, player_entities | enemy_entities | out_entities)
 
     def get_id(self, game_id):
@@ -495,9 +486,3 @@ class MatchupDB(DB):
     def get(self):
         self.query = self.db_config["select_file"]
         self._exec_query_many(self.query, {})
-
-
-class IntertableQueries(DB):
-    def __init__(self, secret_path: str, config_path: str):
-        super().__init__(config_path)
-        self._set_attrs(config_path, "intertable_queries")

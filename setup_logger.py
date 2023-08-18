@@ -18,3 +18,12 @@ def get_handler():
     handler.setFormatter(formatter)
 
     return handler
+
+
+def get_logger(name):
+    logger = logging.getLogger(name)
+    if not logger.hasHandlers():
+        logger.setLevel(logging.INFO)
+        logger.addHandler(get_handler())
+        logger.handler_set = True
+    return logger

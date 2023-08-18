@@ -4,7 +4,7 @@ from random import gauss
 
 import pandas as pd
 
-from database_access import BuildOrder, GameInfo, MatchupDB, PlayerInfo
+from database_access import MatchupDB
 from replay_process import ReplayFilter
 
 
@@ -94,6 +94,7 @@ class NormalizeColumns:
     def __init__(self, game_info_file, supply_data_file) -> None:
         self.supply_data = pd.read_csv(supply_data_file, index_col="name")
         self.game_info = pd.read_csv(game_info_file, index_col="name")
+        self.game_info = self.game_info.rename(columns=str.lower)
 
     def setup_filter(
         self,
@@ -191,11 +192,11 @@ class DensityVals:
         return data
 
     def _get_sum(self, data):
-        sum = 0
+        my_sum = 0
         for key, val in data.items():
             if key in self.supply_data.index:
-                sum += val
-        return sum
+                my_sum += val
+        return my_sum
 
     def transform(self, data):
         units_sum = self._get_sum(data)
@@ -213,13 +214,13 @@ class Extractor:
     def extract_ids(self):
         ids = []
         with self.game_info_db as db:
-            for row in db.get():
-                ids.append(row[0])
+            ids = [row[0] for row in db.get()]
         return ids
 
     def extract_data(self, game_id):
         with self.game_info_db as db:
-            end_tick, p1r, p1w, p1l, p2r, p2w, p2l = db.get_players_info(game_id)
+            out = db.get_players_info(game_id)
+            end_tick, p1r, p1w, p1l, p2r, p2w, p2l = out
             data = {
                 "end_tick": end_tick,
                 "player_1": {
@@ -271,7 +272,7 @@ class Loader:
     def _format_entity_dict(self, entity_dict, prefix="p"):
         entity_dict = entity_dict.copy()
         for key, val in entity_dict.items():
-            new_key = prefix + "_" + key
+            new_key = prefix + "_" + key.lower()
             entity_dict[new_key] = val
             del entity_dict[key]
         return entity_dict

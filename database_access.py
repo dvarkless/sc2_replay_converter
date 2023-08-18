@@ -1,14 +1,12 @@
-import logging
 import sys
 from datetime import datetime
-from time import strftime, strptime
 
 import psycopg2 as pgsql
 from psycopg2 import sql
 from psycopg2.extras import DictCursor
 
 from config import get_config
-from setup_handler import get_handler
+from setup_logger import get_logger
 
 
 class Singleton(type):
@@ -24,9 +22,7 @@ class DB(metaclass=Singleton):
     def __init__(self, config_path: str, db_return_type=None):
         self.config = get_config(config_path)
         self.db_return_type = db_return_type
-        self.logger = logging.getLogger(__name__)
-        self.logger.addHandler(get_handler())
-        self.logger.setLevel(logging.DEBUG)
+        self.logger = get_logger(__name__)
 
     def __enter__(self):
         self.conn = self._get_connection()
@@ -114,6 +110,8 @@ class DB(metaclass=Singleton):
             self.logger.error(e)
             self.conn = self._get_connection()
             self.cur = self.conn.cursor()
+        self.last_query = query
+        self.logger.info(self.last_query)
         self._save_changes()
 
     def exists(self):
@@ -169,15 +167,9 @@ class DB(metaclass=Singleton):
             self.logger.error(f"Error:{e} \nAT QUERY: '{query}'")
             sys.exit()
         self.logger.debug(self.last_query)
-        while True:
-            item = None
-            try:
-                item = self.cur.fetchone()
-            except pgsql.ProgrammingError as e:
-                print(e)
-                self.logger.warning(e)
-            self.logger.debug(f"Output: {item}")
-            yield item if item is not None else StopIteration
+        items = self.cur.fetchall()
+        self.logger.debug(f"Output: {items[0]}...")
+        return items
 
     def _exec_insert(self, query, kwargs):
         query = self.cur.mogrify(query, kwargs)
@@ -223,8 +215,8 @@ class DB(metaclass=Singleton):
         raise NotImplementedError
 
     def get(self):
-        self.query = self.db_config["select_all"]
-        self._exec_query_many(self.query, dict())
+        self.query = self.db_config["select_file"]
+        return self._exec_query_many(self.query, {})
 
 
 class GameInfo(DB):
@@ -240,9 +232,11 @@ class GameInfo(DB):
         end_time,
         player_1_id,
         player_1_race,
+        player_1_winner,
         player_1_league,
         player_2_id,
         player_2_race,
+        player_2_winner,
         player_2_league,
         map_hash,
         matchup,
@@ -257,9 +251,11 @@ class GameInfo(DB):
             "end_time": end_time,
             "player_1_id": player_1_id,
             "player_1_race": player_1_race,
+            "player_1_winner": player_1_winner,
             "player_1_league": player_1_league,
             "player_2_id": player_2_id,
             "player_2_race": player_2_race,
+            "player_2_winner": player_2_winner,
             "player_2_league": player_2_league,
             "map_hash": map_hash,
             "matchup": matchup,
@@ -435,7 +431,8 @@ class BuildOrder(DB):
 class MatchupDB(DB):
     def __init__(self, table_name, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path, db_return_type="dict")
-        self._set_attrs(db_config_path, table_name)
+        self._set_attrs(db_config_path, "matchup_table")
+        self.name = table_name
 
     def construct_create_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
@@ -481,8 +478,8 @@ class MatchupDB(DB):
     def get_id(self, game_id):
         to_pass = {"game_id": game_id}
         self.query = self.db_config["select_where_id"]
-        self._exec_query_many(self.query, to_pass)
+        return self._exec_query_many(self.query, to_pass)
 
     def get(self):
         self.query = self.db_config["select_file"]
-        self._exec_query_many(self.query, {})
+        return self._exec_query_many(self.query, {})

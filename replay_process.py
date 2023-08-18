@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -6,7 +5,7 @@ import pandas as pd
 from alive_progress import alive_it
 
 from database_access import BuildOrder, GameInfo, MapInfo, PlayerInfo
-from setup_handler import get_handler
+from setup_logger import get_logger
 from starcraft2_replay_parse.replay_tools import BuildOrderData, ReplayData
 
 
@@ -61,9 +60,7 @@ class ReplayFilter:
             setattr(self, filter_name, None)
 
         self.passed_filters = [True for i in self._list_filters]
-        self.logger = logging.getLogger(__name__)
-        self.logger.addHandler(get_handler())
-        self.logger.setLevel(logging.DEBUG)
+        self.logger = get_logger(__name__)
         self.report = "No report to show, please call this instance"
 
     def get_valid_types(self, name):
@@ -277,9 +274,7 @@ class ReplayProcess:
         self.build_order_cls = BuildOrderData(max_tick, ticks_per_pos, game_data_path)
         self.game_data = pd.read_csv(game_data_path, index_col="name")
         self.jupyter = jupyter
-        self.logger = logging.getLogger(__name__)
-        self.logger.addHandler(get_handler())
-        self.logger.setLevel(logging.DEBUG)
+        self.logger = get_logger(__name__)
 
     def init_dbs(self):
         for db in self.dbs:
@@ -370,7 +365,7 @@ class ReplayProcess:
                     val_type = self.game_data.loc[key, "type"].lower()
                 except KeyError:
                     val_type = "special"
-                new_key = f"player_{i+1}_{val_type}_{key}"
+                new_key = f"player_{i+1}_{val_type}_{key.lower()}"
                 full_upload_dict[new_key] = val
 
         ticks = self.build_order_cls.get_ticks()

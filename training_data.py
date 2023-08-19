@@ -9,7 +9,9 @@ from replay_process import ReplayFilter
 
 
 class ReorganizePlayers:
-    def __init__(self, player: str, enemy: str, min_league: int, include_unranked=True) -> None:
+    def __init__(
+        self, player: str, enemy: str, min_league: int, include_unranked=True
+    ) -> None:
         self.player = player
         self.enemy = enemy
         self.min_league = min_league
@@ -47,37 +49,44 @@ class RandomPoints:
         self.get_final_point = get_final_point
         self.final_point_step = final_point_step
         self.tick_step = tick_step
+        self.final_point_pos = self._from_tick(final_point_step)
 
-    def get_random_ticks(self, end_val, tick_step, constrained=True):
-        end_val = int(end_val // tick_step * tick_step)
-        out_tick = 0
+    def _to_tick(self, val):
+        return int(val) * self.tick_step
+
+    def _from_tick(self, val):
+        return val // self.tick_step
+
+    def get_random_ticks(self, end_val):
+        end_pos = self._from_tick(end_val)
+        out_pos = 0
         out_list = []
-        end_tick = end_val if not constrained else end_val - self.final_point_step
-        while out_tick < end_tick:
-            out_tick = int(out_tick // tick_step * tick_step)
-            out_list.append(out_tick)
-            out_tick += self.mean_step * (gauss(self.mean_step, self.sigma) + 1)
+        end_pos = (
+            end_pos if not self.get_final_point else end_pos - self.final_point_pos
+        )
+        out_pos += self._from_tick(gauss(self.mean_step, self.sigma)) // 2
+        while out_pos < end_pos:
+            out_list.append(out_pos)
+            out_pos += self._from_tick(gauss(self.mean_step, self.sigma))
 
-        worst_case_val = [int(end_val // 2 // tick_step * tick_step)]
+        worst_case_val = [end_pos // 2]
         return out_list if out_list else worst_case_val
 
-    def get_final_points(self, starting_points, end_val, tick_step):
-        end_val = int(end_val // tick_step * tick_step)
+    def get_final_points(self, starting_points, end_val):
         final_points = []
         if self.get_final_point:
             for point in starting_points:
                 final_point = point + self.final_point_step
-                final_point = int(final_point // tick_step * tick_step)
-                final_point = min(final_point, end_val)
+                final_point = min(final_point, self._from_tick(end_val))
                 final_points.append(point)
         return final_points
 
     def transform(self, end_val):
-        out_points = self.get_random_ticks(
-            end_val, self.tick_step, constrained=self.get_final_point
-        )
-        final_points = self.get_final_points(out_points, end_val, self.tick_step)
-        return (out_points, final_points)
+        out_points = self.get_random_ticks(end_val)
+        final_points = self.get_final_points(out_points, end_val)
+        out_ticks = [self._to_tick(p) for p in out_points]
+        final_ticks = [self._to_tick(p) for p in final_points]
+        return (out_ticks, final_ticks)
 
 
 class NormalizeColumns:
@@ -94,7 +103,7 @@ class NormalizeColumns:
     def __init__(self, game_info_file, supply_data_file) -> None:
         self.supply_data = pd.read_csv(supply_data_file, index_col="name")
         self.game_info = pd.read_csv(game_info_file, index_col="name")
-        self.game_info = self.game_info.rename(columns=str.lower)
+        self.game_info = self.game_info.rename(index=str.lower)
 
     def setup_filter(
         self,
@@ -107,7 +116,7 @@ class NormalizeColumns:
         include_units=True,
     ):
         self.player = player
-        self.r = r
+        self.r = self.game_race_dict[r]
         self.include_buildings = include_buildings
         self.include_upgrades = include_upgrades
         self.include_special = include_special
@@ -118,10 +127,13 @@ class NormalizeColumns:
         # ("player_N_column", int_val)
         pairs = list(data.items())
         # Example:
-        # Pass if player_1 in player_1_Drone
+        # Pass if player_1 in player_1_unit_Drone
         pairs = [pair for pair in pairs if self.player in pair[0]]
-        # player_1_Drone ==> Drone
+        # player_1_unit_Drone ==> unit_Drone
         pairs = [(pair[0].removeprefix(self.player + "_"), pair[1]) for pair in pairs]
+        # unit_Drone ==> Drone
+        for prefix in ("upgrade_", "building_", "special_", "unit_"):
+            pairs = [(pair[0].removeprefix(prefix), pair[1]) for pair in pairs]
         # Pass if Drone in zerg units
         df = self._filter_race(self.game_info, self.r)
         if not self.include_units:
@@ -157,7 +169,7 @@ class NormalizeColumns:
         return df
 
     def normalize_units(self, name, val):
-        if name in self.supply_data.loc[:, "name"]:
+        if name in self.supply_data.index:
             val *= self.supply_data.loc[name, "supply"]
         return (name, val)
 
@@ -179,9 +191,20 @@ class DensityVals:
     def __init__(
         self,
         supply_data_file,
+        reducer="avg",
     ) -> None:
         self.supply_data = pd.read_csv(supply_data_file, index_col="name")
+        possible_reducers = ("avg", "softmax")
+        if reducer not in possible_reducers:
+            raise KeyError(f"Key 'reducer' should be chosen from {possible_reducers}")
+        self.reducer_func = self.reducer_funcs(reducer)
 
+    def reducer_funcs(self, name):
+        reducer_funcs = {
+                "avg": self._get_avg_vals,
+                "softmax": self._get_softmax_vals,
+                }
+        return reducer_funcs[name]
     def ceil(self, data):
         for key, val in data.items():
             if key in self.supply_data.index:
@@ -191,25 +214,55 @@ class DensityVals:
                     data[key] = max(val, 0.0)
         return data
 
-    def _get_sum(self, data):
+    def get_diff(self, data_start, data_end):
+        return_dict = {}
+        for key, val_end in data_end.items():
+            try:
+                val_start = data_start[key]
+            except KeyError as exc:
+                raise ValueError(f"Bad input data, key '{key}' is not in second dict") from exc
+            return_dict[key] = val_end - val_start
+        return return_dict
+
+    def _get_avg_vals(self, data):
         my_sum = 0
         for key, val in data.items():
             if key in self.supply_data.index:
                 my_sum += val
-        return my_sum
-
-    def transform(self, data):
-        units_sum = self._get_sum(data)
+        my_sum = my_sum if my_sum else 1
         new_dict = {}
         for key, val in data.items():
-            new_dict[key] = val/units_sum
-        return self.ceil(new_dict)
+            new_dict[key] = val / my_sum
+        return new_dict
+
+    def _get_softmax_vals(self, data):
+        my_sum = 0
+        for key, val in data.items():
+            if key in self.supply_data.index:
+                my_sum += exp(val)
+        my_sum = my_sum if my_sum else 1
+        new_dict = {}
+        for key, val in data.items():
+            new_dict[key] = exp(val) / my_sum
+        return new_dict
+
+    def transform_diff(self, data_start, data_end):
+        diff_dict = self.get_diff(data_start, data_end)
+        diff_dict = self.ceil(diff_dict)
+        new_dict = self.reducer_func(diff_dict)
+        return new_dict
+
+    def transform_single(self, data):
+        data = self.ceil(data)
+        new_dict = self.reducer_func(data)
+        return new_dict
 
 
 class Extractor:
-    def __init__(self, game_info_db, build_order_db) -> None:
+    def __init__(self, game_info_db, build_order_db, ticks_per_second) -> None:
         self.game_info_db = game_info_db
         self.build_order_db = build_order_db
+        self.ticks_per_second = ticks_per_second
 
     def extract_ids(self):
         ids = []
@@ -220,16 +273,16 @@ class Extractor:
     def extract_data(self, game_id):
         with self.game_info_db as db:
             out = db.get_players_info(game_id)
-            end_tick, p1r, p1w, p1l, p2r, p2w, p2l = out
+            end_seconds, p1r, p1w, p1l, p2r, p2w, p2l = out
             data = {
-                "end_tick": end_tick,
+                "end_tick": end_seconds * self.ticks_per_second,
                 "player_1": {
-                    "is_win": p1w,
+                    "is_win": p1w if p1w is not None else False,
                     "race": p1r,
                     "league": p1l,
                 },
                 "player_2": {
-                    "is_win": p2w,
+                    "is_win": p2w if p2w is not None else False,
                     "race": p2r,
                     "league": p2l,
                 },
@@ -240,7 +293,7 @@ class Extractor:
         return_dicts = []
         with self.build_order_db as db:
             for tick in ticks:
-                return_dicts.append(db.get_by_keys(game_id, tick))
+                return_dicts.append(dict(db.get_by_keys(game_id, tick)))
 
         return return_dicts
 
@@ -262,20 +315,25 @@ class Loader:
         self.enemy_r = enemy_r
         self.table_name = f"{player_r}v{enemy_r}_{table_type}"
 
-        self.db = self.get_init_table()
+        self.db = MatchupDB(self.table_name, self.secrets_path, self.db_config_path)
+        self.db_accessed = False
 
-    def get_init_table(self):
-        if not hasattr(self, "db"):
-            return MatchupDB(self.table_name, self.secrets_path, self.db_config_path)
-        return self.db
+    @property
+    def db(self):
+        return self._db
+
+    @db.setter
+    def db(self, db_inst):
+        if not hasattr(self, "_db"):
+            self._db = db_inst
 
     def _format_entity_dict(self, entity_dict, prefix="p"):
         entity_dict = entity_dict.copy()
+        new_entity_dict = {}
         for key, val in entity_dict.items():
             new_key = prefix + "_" + key.lower()
-            entity_dict[new_key] = val
-            del entity_dict[key]
-        return entity_dict
+            new_entity_dict[new_key] = val
+        return new_entity_dict
 
     def _get_formatted_dicts(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
@@ -293,4 +351,7 @@ class Loader:
         )
 
         with self.db as db:
+            if not self.db_accessed:
+                db.create_table(player_entities, enemy_entities, out_entities)
+                self.db_accessed = True
             db.put(player_entities, enemy_entities, out_entities)

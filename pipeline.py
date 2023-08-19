@@ -1,11 +1,10 @@
-from itertools import zip_longest
+from itertools import permutations, zip_longest
 
 from alive_progress import alive_bar, alive_it
 
 from database_access import BuildOrder, GameInfo
-from training_data import (CalcWinprob, CeilOutput, DensityVals, Extractor,
-                           FilterRace, Loader, NormalizeColumns,
-                           NormalizeUnits, RandomPoints, ReorganizePlayers)
+from training_data import (CalcWinprob, DensityVals, Extractor, Loader,
+                           NormalizeColumns, RandomPoints, ReorganizePlayers)
 
 
 class Pipeline:
@@ -14,13 +13,22 @@ class Pipeline:
     ticks_per_min = 960
 
     def __init__(
-        self, player_r, enemy_r, mins_per_point, tick_step=16, jupyter=None
+        self,
+        player_r,
+        enemy_r,
+        mins_per_point,
+        game_ticks_per_second=16,
+        tick_step=16,
+        min_len=1920,
+        jupyter=None,
     ) -> None:
         self.player_r = player_r
         self.enemy_r = enemy_r
         self.ticks_per_point = mins_per_point * self.ticks_per_min
         self.jupyter = jupyter
+        self.game_ticks_per_second = game_ticks_per_second
         self.tick_step = tick_step
+        self.min_len = min_len
 
     def configure_dbs(self, secrets_path, db_config_path):
         self.secrets_path = secrets_path
@@ -35,11 +43,11 @@ class Pipeline:
 
     def configure_points(self, sigma, get_final_point, final_point_step):
         self.points = RandomPoints(
-            self.ticks_per_point,
-            sigma,
-            get_final_point,
-            final_point_step,
-            self.tick_step,
+            mean_step=self.ticks_per_point,
+            sigma=sigma,
+            get_final_point=get_final_point,
+            final_point_step=final_point_step,
+            tick_step=self.tick_step,
         )
 
     def configure_normalize(self, game_info_file, supply_data_file):
@@ -48,11 +56,13 @@ class Pipeline:
     def configure_calc_winprob(self, delay):
         self.winprob = CalcWinprob(delay)
 
-    def configure_dense(self, supply_data_file):
-        self.dense = DensityVals(supply_data_file)
+    def configure_dense(self, supply_data_file, reducer):
+        self.dense = DensityVals(supply_data_file, reducer)
 
     def configure_extractor(self):
-        self.extractor = Extractor(self.game_info_db, self.build_order_db)
+        self.extractor = Extractor(
+            self.game_info_db, self.build_order_db, self.game_ticks_per_second
+        )
 
     def transform_player(self, data, player):
         raise NotImplementedError
@@ -60,7 +70,7 @@ class Pipeline:
     def transform_enemy(self, data, enemy):
         raise NotImplementedError
 
-    def transform_out(self, data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
         raise NotImplementedError
 
     def _configure_loader(self, table_type):
@@ -99,13 +109,18 @@ class Pipeline:
                     yield (id, curr_player, is_win, data["end_tick"])
 
     def run(self):
-        assert all((hasattr(self, name) for name in self.steps))
+        if not all((hasattr(self, name) for name in self.steps)):
+            vals = [f"{name}: {hasattr(self, name)}\n" for name in self.steps]
+            raise ValueError(f"Missing configured steps: \n{vals}")
+
         ids = self.extractor.extract_ids()
 
         for game_id, player, is_win, end_tick in self._iter_id_player_is_win(ids):
             enemy = "player_1" if player == "player_2" else "player_2"
             starting_points, end_points = self.points.transform(end_tick)
-            starting_dicts = self.extractor.extract_build_order(game_id, starting_points)
+            starting_dicts = self.extractor.extract_build_order(
+                game_id, starting_points
+            )
             if end_points:
                 end_dicts = self.extractor.extract_build_order(game_id, end_points)
             else:
@@ -115,17 +130,16 @@ class Pipeline:
             ):
                 player_dict = self.transform_player(start_dict, player)
                 enemy_dict = self.transform_enemy(start_dict, enemy)
-                out_data = end_dict if end_dict is not None else start_dict
                 out_dict = self.transform_out(
-                    out_data, player, enemy, end_point, is_win, end_tick
+                    start_dict, end_dict, player, enemy, end_point, is_win, end_tick
                 )
                 self.loader.upload_data(player_dict, enemy_dict, out_dict)
+                assert None
 
 
 class CompPipeline(Pipeline):
     steps = [
         "extractor",
-        "filter",
         "organize",
         "points",
         "normalize",
@@ -150,10 +164,11 @@ class CompPipeline(Pipeline):
         self.normalize.setup_filter(enemy, self.enemy_r)
         return self.normalize.transform(data)
 
-    def transform_out(self, data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
         self.normalize.setup_filter(player, self.player_r)
-        out_dict = self.normalize.transform(data)
-        out_dict = self.dense.transform(out_dict)
+        out1_dict = self.normalize.transform(earlier_data)
+        out2_dict = self.normalize.transform(later_data)
+        out_dict = self.dense.transform_diff(out1_dict, out2_dict)
         return out_dict
 
 
@@ -186,7 +201,7 @@ class WinprobPipeline(Pipeline):
         self.normalize.setup_filter(enemy, self.enemy_r, include_buildings=True)
         return self.normalize.transform(data)
 
-    def transform_out(self, data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
         out_dict = {}
         out_dict["is_win"] = self.winprob.transform(final_tick, is_win, end_tick)
         return out_dict
@@ -195,7 +210,6 @@ class WinprobPipeline(Pipeline):
 class EnemycompPipeline(Pipeline):
     steps = [
         "extractor",
-        "filter",
         "organize",
         "points",
         "normalize",
@@ -219,10 +233,10 @@ class EnemycompPipeline(Pipeline):
         )
         return self.normalize.transform(data)
 
-    def transform_out(self, data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
         self.normalize.setup_filter(enemy, self.enemy_r, include_buildings=True)
-        out_dict = self.normalize.transform(data)
-        out_dict = self.dense.transform(out_dict)
+        out_dict = self.normalize.transform(earlier_data)
+        out_dict = self.dense.transform_single(out_dict)
         return out_dict
 
 
@@ -236,9 +250,17 @@ class PipelineComposer:
         self.game_info_file = "./starcraft2_replay_parse/game_info.csv"
         self.supply_data_file = "./game_data/supply_data.csv"
 
-    def get_compositon(self, mins_per_sample, prediction_minute_step, min_league):
+    def change_matchup(self, matchup):
+        self.player_r, self.enemy_r = matchup.lower().split("v")
+
+    def get_compositon(self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"):
         pipeline = CompPipeline(
-            self.player_r, self.enemy_r, mins_per_sample, self.tick_step, self.jupyter
+            self.player_r,
+            self.enemy_r,
+            mins_per_sample,
+            game_ticks_per_second=16,
+            tick_step=self.tick_step,
+            jupyter=self.jupyter,
         )
         final_point_step = prediction_minute_step * pipeline.ticks_per_min
         pipeline.configure_dbs(self.secrets_path, self.db_config_path)
@@ -250,13 +272,17 @@ class PipelineComposer:
             final_point_step=final_point_step,
         )
         pipeline.configure_normalize(self.game_info_file, self.supply_data_file)
-        pipeline.configure_dense(self.supply_data_file)
+        pipeline.configure_dense(self.supply_data_file, reducer)
         pipeline.configure_loader()
         return pipeline
 
-    def get_winprob(self, mins_per_sample, prediction_minute_step, min_league):
+    def get_win_probability(self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"):
         pipeline = WinprobPipeline(
-            self.player_r, self.enemy_r, mins_per_sample, self.tick_step, self.jupyter
+            self.player_r,
+            self.enemy_r,
+            mins_per_sample,
+            self.tick_step,
+            jupyter=self.jupyter,
         )
         final_point_step = prediction_minute_step * pipeline.ticks_per_min
         pipeline.configure_dbs(self.secrets_path, self.db_config_path)
@@ -270,13 +296,19 @@ class PipelineComposer:
         pipeline.configure_normalize(self.game_info_file, self.supply_data_file)
         # Delay determines tolerance for game lengths >> final_point_step
         pipeline.configure_calc_winprob(delay=5)
-        pipeline.configure_dense(self.supply_data_file)
+        pipeline.configure_dense(self.supply_data_file, reducer)
         pipeline.configure_loader()
         return pipeline
 
-    def get_enemycomp(self, mins_per_sample, prediction_minute_step, min_league):
+    def get_enemy_composition(
+        self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
+    ):
         pipeline = CompPipeline(
-            self.player_r, self.enemy_r, mins_per_sample, self.jupyter
+            self.player_r,
+            self.enemy_r,
+            mins_per_sample,
+            self.tick_step,
+            jupyter=self.jupyter,
         )
         final_point_step = prediction_minute_step * pipeline.ticks_per_min
         pipeline.configure_dbs(self.secrets_path, self.db_config_path)
@@ -288,6 +320,28 @@ class PipelineComposer:
             final_point_step=final_point_step,
         )
         pipeline.configure_normalize(self.game_info_file, self.supply_data_file)
-        pipeline.configure_dense(self.supply_data_file)
+        pipeline.configure_dense(self.supply_data_file, reducer)
         pipeline.configure_loader()
         return pipeline
+
+
+if __name__ == "__main__":
+    MINS_PER_SAMPLE = 4
+    PRED_STEP = 1
+    MIN_LEAGUE = 3
+    r_pairs = permutations("ZTP", 2)
+    matchups = ["v".join((r1, r2)) for r1, r2 in r_pairs]
+    composer = PipelineComposer("ZvZ", tick_step=32)
+    for matchup in matchups:
+        composer.change_matchup(matchup)
+        comp_pipeline = composer.get_compositon(MINS_PER_SAMPLE, PRED_STEP, MIN_LEAGUE)
+        winprob_pipeline = composer.get_win_probability(
+            MINS_PER_SAMPLE, PRED_STEP, MIN_LEAGUE
+        )
+        enemycomp_pipeline = composer.get_enemy_composition(
+            MINS_PER_SAMPLE, PRED_STEP, MIN_LEAGUE
+        )
+
+        comp_pipeline.run()
+        winprob_pipeline.run()
+        enemycomp_pipeline.run()

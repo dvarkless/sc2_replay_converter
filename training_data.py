@@ -3,6 +3,7 @@ from pathlib import Path
 from random import gauss
 
 import pandas as pd
+from psycopg2 import ProgrammingError
 
 from database_access import MatchupDB
 from replay_process import ReplayFilter
@@ -76,9 +77,9 @@ class RandomPoints:
         final_points = []
         if self.get_final_point:
             for point in starting_points:
-                final_point = point + self.final_point_step
+                final_point = point + self.final_point_pos
                 final_point = min(final_point, self._from_tick(end_val))
-                final_points.append(point)
+                final_points.append(final_point)
         return final_points
 
     def transform(self, end_val):
@@ -194,6 +195,7 @@ class DensityVals:
         reducer="avg",
     ) -> None:
         self.supply_data = pd.read_csv(supply_data_file, index_col="name")
+        self.supply_data = self.supply_data.rename(index=str.lower)
         possible_reducers = ("avg", "softmax")
         if reducer not in possible_reducers:
             raise KeyError(f"Key 'reducer' should be chosen from {possible_reducers}")
@@ -201,10 +203,11 @@ class DensityVals:
 
     def reducer_funcs(self, name):
         reducer_funcs = {
-                "avg": self._get_avg_vals,
-                "softmax": self._get_softmax_vals,
-                }
+            "avg": self._get_avg_vals,
+            "softmax": self._get_softmax_vals,
+        }
         return reducer_funcs[name]
+
     def ceil(self, data):
         for key, val in data.items():
             if key in self.supply_data.index:
@@ -220,7 +223,9 @@ class DensityVals:
             try:
                 val_start = data_start[key]
             except KeyError as exc:
-                raise ValueError(f"Bad input data, key '{key}' is not in second dict") from exc
+                raise ValueError(
+                    f"Bad input data, key '{key}' is not in second dict"
+                ) from exc
             return_dict[key] = val_end - val_start
         return return_dict
 
@@ -228,7 +233,7 @@ class DensityVals:
         my_sum = 0
         for key, val in data.items():
             if key in self.supply_data.index:
-                my_sum += val
+                my_sum += val * self.supply_data.loc[key, "supply"]
         my_sum = my_sum if my_sum else 1
         new_dict = {}
         for key, val in data.items():
@@ -318,15 +323,6 @@ class Loader:
         self.db = MatchupDB(self.table_name, self.secrets_path, self.db_config_path)
         self.db_accessed = False
 
-    @property
-    def db(self):
-        return self._db
-
-    @db.setter
-    def db(self, db_inst):
-        if not hasattr(self, "_db"):
-            self._db = db_inst
-
     def _format_entity_dict(self, entity_dict, prefix="p"):
         entity_dict = entity_dict.copy()
         new_entity_dict = {}
@@ -343,8 +339,36 @@ class Loader:
         out_entities = self._format_entity_dict(out_entities, "out")
         return player_entities, enemy_entities, out_entities
 
+    def prepare(self):
+        self.db.change_table(self.table_name)
+
+    def check_if_game_exists(self, game_id):
+        with self.db as db:
+            try:
+                out = db.get_id(game_id)
+            except AttributeError:
+                return False
+            except ProgrammingError:
+                return False
+            return bool(out)
+
+    def check_if_tick_exists(self, game_id, tick):
+        with self.db as db:
+            try:
+                out = db.get_by_key(game_id, tick)
+            except AttributeError:
+                return False
+            except ProgrammingError:
+                return False
+            return bool(out)
+
     def upload_data(
-        self, player_entities: dict, enemy_entities: dict, out_entities: dict
+        self,
+        game_id: int,
+        tick: int,
+        player_entities: dict,
+        enemy_entities: dict,
+        out_entities: dict,
     ):
         player_entities, enemy_entities, out_entities = self._get_formatted_dicts(
             player_entities, enemy_entities, out_entities
@@ -352,6 +376,7 @@ class Loader:
 
         with self.db as db:
             if not self.db_accessed:
+                self.db.change_table(self.table_name)
                 db.create_table(player_entities, enemy_entities, out_entities)
                 self.db_accessed = True
-            db.put(player_entities, enemy_entities, out_entities)
+            db.put(game_id, tick, player_entities, enemy_entities, out_entities)

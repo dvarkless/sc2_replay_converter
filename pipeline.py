@@ -70,7 +70,9 @@ class Pipeline:
     def transform_enemy(self, data, enemy):
         raise NotImplementedError
 
-    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(
+        self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick
+    ):
         raise NotImplementedError
 
     def _configure_loader(self, table_type):
@@ -114,8 +116,11 @@ class Pipeline:
             raise ValueError(f"Missing configured steps: \n{vals}")
 
         ids = self.extractor.extract_ids()
+        self.loader.prepare()
 
         for game_id, player, is_win, end_tick in self._iter_id_player_is_win(ids):
+            if self.loader.check_if_game_exists(game_id):
+                continue
             enemy = "player_1" if player == "player_2" else "player_2"
             starting_points, end_points = self.points.transform(end_tick)
             starting_dicts = self.extractor.extract_build_order(
@@ -133,8 +138,11 @@ class Pipeline:
                 out_dict = self.transform_out(
                     start_dict, end_dict, player, enemy, end_point, is_win, end_tick
                 )
-                self.loader.upload_data(player_dict, enemy_dict, out_dict)
-                assert None
+                tick = start_dict["tick"]
+                if not self.loader.check_if_tick_exists(game_id, tick):
+                    self.loader.upload_data(
+                        game_id, tick, player_dict, enemy_dict, out_dict
+                    )
 
 
 class CompPipeline(Pipeline):
@@ -156,7 +164,6 @@ class CompPipeline(Pipeline):
             self.player_r,
             include_buildings=True,
             include_special=True,
-            include_tick=True,
         )
         return self.normalize.transform(data)
 
@@ -164,7 +171,9 @@ class CompPipeline(Pipeline):
         self.normalize.setup_filter(enemy, self.enemy_r)
         return self.normalize.transform(data)
 
-    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(
+        self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick
+    ):
         self.normalize.setup_filter(player, self.player_r)
         out1_dict = self.normalize.transform(earlier_data)
         out2_dict = self.normalize.transform(later_data)
@@ -193,7 +202,6 @@ class WinprobPipeline(Pipeline):
             include_buildings=True,
             include_upgrades=True,
             include_special=True,
-            include_tick=True,
         )
         return self.normalize.transform(data)
 
@@ -201,7 +209,9 @@ class WinprobPipeline(Pipeline):
         self.normalize.setup_filter(enemy, self.enemy_r, include_buildings=True)
         return self.normalize.transform(data)
 
-    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(
+        self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick
+    ):
         out_dict = {}
         out_dict["is_win"] = self.winprob.transform(final_tick, is_win, end_tick)
         return out_dict
@@ -218,7 +228,7 @@ class EnemycompPipeline(Pipeline):
     ]
 
     def configure_loader(self):
-        super()._configure_loader("winprob")
+        super()._configure_loader("enemycomp")
 
     def transform_player(self, data, player):
         return {}
@@ -228,12 +238,13 @@ class EnemycompPipeline(Pipeline):
             enemy,
             self.enemy_r,
             include_buildings=True,
-            include_tick=True,
             include_units=False,
         )
         return self.normalize.transform(data)
 
-    def transform_out(self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick):
+    def transform_out(
+        self, earlier_data, later_data, player, enemy, final_tick, is_win, end_tick
+    ):
         self.normalize.setup_filter(enemy, self.enemy_r, include_buildings=True)
         out_dict = self.normalize.transform(earlier_data)
         out_dict = self.dense.transform_single(out_dict)
@@ -253,7 +264,9 @@ class PipelineComposer:
     def change_matchup(self, matchup):
         self.player_r, self.enemy_r = matchup.lower().split("v")
 
-    def get_compositon(self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"):
+    def get_compositon(
+        self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
+    ):
         pipeline = CompPipeline(
             self.player_r,
             self.enemy_r,
@@ -276,12 +289,15 @@ class PipelineComposer:
         pipeline.configure_loader()
         return pipeline
 
-    def get_win_probability(self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"):
+    def get_win_probability(
+        self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
+    ):
         pipeline = WinprobPipeline(
             self.player_r,
             self.enemy_r,
             mins_per_sample,
-            self.tick_step,
+            game_ticks_per_second=16,
+            tick_step=self.tick_step,
             jupyter=self.jupyter,
         )
         final_point_step = prediction_minute_step * pipeline.ticks_per_min
@@ -303,11 +319,12 @@ class PipelineComposer:
     def get_enemy_composition(
         self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
     ):
-        pipeline = CompPipeline(
+        pipeline = EnemycompPipeline(
             self.player_r,
             self.enemy_r,
             mins_per_sample,
-            self.tick_step,
+            game_ticks_per_second=16,
+            tick_step=self.tick_step,
             jupyter=self.jupyter,
         )
         final_point_step = prediction_minute_step * pipeline.ticks_per_min
@@ -332,6 +349,7 @@ if __name__ == "__main__":
     r_pairs = permutations("ZTP", 2)
     matchups = ["v".join((r1, r2)) for r1, r2 in r_pairs]
     composer = PipelineComposer("ZvZ", tick_step=32)
+    matchups = ["zvt"]
     for matchup in matchups:
         composer.change_matchup(matchup)
         comp_pipeline = composer.get_compositon(MINS_PER_SAMPLE, PRED_STEP, MIN_LEAGUE)

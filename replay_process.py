@@ -275,6 +275,7 @@ class ReplayProcess:
         self.game_data = pd.read_csv(game_data_path, index_col="name")
         self.jupyter = jupyter
         self.logger = get_logger(__name__)
+        self.corrupted_data_list = []
 
     def init_dbs(self):
         for db in self.dbs:
@@ -285,7 +286,7 @@ class ReplayProcess:
 
     def upload_game_info(self, replay, replay_path):
         replay_data = replay.as_dict()
-        game_info = dict()
+        game_info = {}
         date_played = replay.replay.date
         game_length = replay.replay.game_length
         game_length = (
@@ -356,7 +357,7 @@ class ReplayProcess:
 
     def upload_build_order(self, replay, game_id, bar=None):
         replay_data = replay.as_dict()
-        full_upload_dict = dict()
+        full_upload_dict = {}
         for i, build_order_dict in enumerate(
             self.build_order_cls.yield_unit_counts(replay_data)
         ):
@@ -370,15 +371,28 @@ class ReplayProcess:
 
         ticks = self.build_order_cls.get_ticks()
         ticks_len = len(ticks)
+        exit_code = False
         for j, tick in enumerate(ticks):
-            to_upload_dict = dict()
+            to_upload_dict = {}
             for key, val in full_upload_dict.items():
                 to_upload_dict[key] = val[j]
             to_upload_dict["game_id"] = game_id
             to_upload_dict["tick"] = tick
+            if tick == 0:
+                s, d, p = to_upload_dict["player_1_unit_scv"], to_upload_dict["player_1_unit_drone"], to_upload_dict["player_1_unit_probe"]
+                if s == d == p == 0:
+                    print(f"Corrupted data at game_id = {game_id}")
+                    self.corrupted_data_list.append(game_id)
+                    return
             if bar is not None:
                 bar.text = f"Processed {j/ticks_len:.1%}"
-            self.upload_info(self.build_order_db, to_upload_dict)
+            try:
+                self.upload_info(self.build_order_db, to_upload_dict)
+            except KeyboardInterrupt:
+                print("KeyboardInterrupt detected! Exiting after data upload finishes")
+                exit_code = True
+        if exit_code:
+            raise KeyboardInterrupt
 
     def upload_info(self, db, to_upload_dict):
         out = None
@@ -441,6 +455,6 @@ if __name__ == "__main__":
         "./configs/secrets.yml",
         "configs/database.yml",
         "./starcraft2_replay_parse/game_info.csv",
-        ticks_per_pos=48,
+        ticks_per_pos=32,
     )
-    processor.process_replays("../replay_data_sample/", filt=replay_filter)
+    processor.process_replays("../replays/", filt=replay_filter)

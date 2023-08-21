@@ -168,7 +168,7 @@ class DB(metaclass=Singleton):
             sys.exit()
         self.logger.debug(self.last_query)
         items = self.cur.fetchall()
-        self.logger.debug(f"Output: {items[0]}...")
+        self.logger.debug(f"Output: {items[0] if items else items}...")
         return items
 
     def _exec_insert(self, query, kwargs):
@@ -433,14 +433,19 @@ class MatchupDB(DB):
         super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, "matchup_table")
         self.name = table_name
+        self.table_created = False
+
+    def change_table(self, table_name):
+        self.name = table_name
+        self.table_created = False
 
     def construct_create_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
         input_entities = player_entities | enemy_entities
-        query = ",\n".join((f"{name} INTEGER" for name in input_entities.keys()))
-        query += ",\n"
-        query += ",\n".join((f"{name} NUMERIC(4, 3)" for name in out_entities.keys()))
+        query = ", ".join((f"{name} INTEGER" for name in input_entities.keys()))
+        query += ", "
+        query += ", ".join((f"{name} NUMERIC(4, 3)" for name in out_entities.keys()))
         template_query = open(
             self.db_config["create_table_file"], encoding="utf-8"
         ).read()
@@ -451,10 +456,10 @@ class MatchupDB(DB):
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
         entities = player_entities | enemy_entities | out_entities
-        input_query = ", ".join((f"{name}" for name in entities.keys()))
-        get_query = ", ".join((f"%({name})s" for name in entities.keys()))
+        input_query = ",\n".join((f"{name}" for name in entities.keys()))
+        get_query = ",\n".join((f"%({name})s" for name in entities.keys()))
         template_query = open(
-            self.db_config["create_table_file"], encoding="utf-8"
+            self.db_config["insert_file"], encoding="utf-8"
         ).read()
         query = template_query.format(
             self.name, cols=input_query, formatted_cols=get_query
@@ -467,18 +472,25 @@ class MatchupDB(DB):
         query = self.construct_create_query(
             player_entities, enemy_entities, out_entities
         )
+        self.table_created = True
         return super().create_table(query=query)
 
-    def put(self, player_entities: dict, enemy_entities: dict, out_entities: dict):
+    def put(self, game_id, tick, player_entities: dict, enemy_entities: dict, out_entities: dict):
         query = self.construct_insert_query(
             player_entities, enemy_entities, out_entities
         )
-        self._exec_insert(query, player_entities | enemy_entities | out_entities)
+        key_dict = {"game_id": game_id, "tick": tick}
+        self._exec_insert(query, key_dict | player_entities | enemy_entities | out_entities)
 
     def get_id(self, game_id):
         to_pass = {"game_id": game_id}
         self.query = self.db_config["select_where_id"]
         return self._exec_query_many(self.query, to_pass)
+
+    def get_by_key(self, game_id, tick):
+        to_pass = {"game_id": game_id, "tick": tick}
+        self.query = self.db_config["select_where_key"]
+        return self._exec_query_one(self.query, to_pass)
 
     def get(self):
         self.query = self.db_config["select_file"]

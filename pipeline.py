@@ -99,7 +99,7 @@ class Pipeline:
             p1_data = data["player_1"].copy()
             p2_data = data["player_2"].copy()
             for i in range(2):
-                if i:
+                if bool(i):
                     data["player_1"] = p1_data
                     data["player_2"] = p2_data
                 else:
@@ -121,6 +121,7 @@ class Pipeline:
         for game_id, player, is_win, end_tick in self._iter_id_player_is_win(ids):
             if self.loader.check_if_game_exists(game_id):
                 continue
+            print(f"Game_id: {game_id}, {player}, Is_win: {is_win}, end_tick: {end_tick}")
             enemy = "player_1" if player == "player_2" else "player_2"
             starting_points, end_points = self.points.transform(end_tick)
             starting_dicts = self.extractor.extract_build_order(

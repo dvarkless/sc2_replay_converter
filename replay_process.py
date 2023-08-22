@@ -203,9 +203,7 @@ class ReplayFilter:
             return True
         replay_date = replay_dict["date"]
         if isinstance(self.time_played, list):
-            return (
-                self.time_played[0] <= replay_date <= self.time_played[1]
-            )
+            return self.time_played[0] <= replay_date <= self.time_played[1]
         return replay_date >= self.time_played
 
     def check_is_1v1(self, replay_dict):
@@ -355,12 +353,23 @@ class ReplayProcess:
             }
             self.upload_info(self.player_info_db, player_info)
 
+    def delete_game(self, game_id):
+        with self.game_info_db as db:
+            db.delete_id(game_id)
+
     def upload_build_order(self, replay, game_id, bar=None):
         replay_data = replay.as_dict()
         full_upload_dict = {}
-        for i, build_order_dict in enumerate(
-            self.build_order_cls.yield_unit_counts(replay_data)
-        ):
+        try:
+            unit_counts = self.build_order_cls.yield_unit_counts(replay_data)
+        except KeyError as exc:
+            msg = "INVALID REPLAY: %s" % exc
+            self.logger.warning(msg)
+            print(msg)
+            self.delete_game(game_id)
+            return
+
+        for i, build_order_dict in enumerate(unit_counts):
             for key, val in build_order_dict.items():
                 try:
                     val_type = self.game_data.loc[key, "type"].lower()
@@ -379,7 +388,11 @@ class ReplayProcess:
             to_upload_dict["game_id"] = game_id
             to_upload_dict["tick"] = tick
             if tick == 0:
-                s, d, p = to_upload_dict["player_1_unit_scv"], to_upload_dict["player_1_unit_drone"], to_upload_dict["player_1_unit_probe"]
+                s, d, p = (
+                    to_upload_dict["player_1_unit_scv"],
+                    to_upload_dict["player_1_unit_drone"],
+                    to_upload_dict["player_1_unit_probe"],
+                )
                 if s == d == p == 0:
                     print(f"Corrupted data at game_id = {game_id}")
                     self.corrupted_data_list.append(game_id)
@@ -415,9 +428,10 @@ class ReplayProcess:
         for replay_path in bar:
             try:
                 replay = ReplayData().parse_replay(replay_path)
-            except Exception as e:
-                print(f"Replay skipped, reason:\n{e}")
-                self.logger.error(f"Replay skipped, reason:\n{e}")
+            except Exception as exc:
+                msg = f"Replay skipped, reason:\n{exc}"
+                print(msg)
+                self.logger.error(msg)
                 continue
 
             if filt is not None:

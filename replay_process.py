@@ -361,7 +361,7 @@ class ReplayProcess:
         replay_data = replay.as_dict()
         full_upload_dict = {}
         try:
-            unit_counts = self.build_order_cls.yield_unit_counts(replay_data)
+            unit_counts = list(self.build_order_cls.yield_unit_counts(replay_data))
         except KeyError as exc:
             msg = "INVALID REPLAY: %s" % exc
             self.logger.warning(msg)

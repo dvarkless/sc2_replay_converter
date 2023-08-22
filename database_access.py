@@ -298,6 +298,10 @@ class GameInfo(DB):
         out = self._exec_query_one(self.query, {"game_id": game_id})
         return out
 
+    def delete_id(self, game_id):
+        self.query = self.db_config["delete_id"]
+        self._exec_update(self.query, {"game_id": game_id})
+
 
 class PlayerInfo(DB):
     def __init__(self, secrets_path: str, db_config_path: str):

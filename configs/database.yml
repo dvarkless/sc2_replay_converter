@@ -10,6 +10,7 @@ game_info:
   select_file: "./queries/select_all.sql"
   select_player: "./queries/select_player_game_info.sql"
   update_path_file: "./queries/update_path_game_info.sql"
+  delete_id: "./queries/delete_id_game_info.sql"
     
 player_info:  
   table_name: "player_info"

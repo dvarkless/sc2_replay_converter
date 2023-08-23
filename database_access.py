@@ -477,9 +477,11 @@ class MatchupDB(DB):
             player_entities, enemy_entities, out_entities
         )
         self.table_created = True
-        return super().create_table(query=query)
+        super().create_table(query=query)
 
     def put(self, game_id, tick, player_entities: dict, enemy_entities: dict, out_entities: dict):
+        if not self.table_created:
+            self.create_table(player_entities, enemy_entities, out_entities)
         query = self.construct_insert_query(
             player_entities, enemy_entities, out_entities
         )

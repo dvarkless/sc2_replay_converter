@@ -234,10 +234,10 @@ class DensityVals:
         for key, val in data.items():
             if key in self.supply_data.index:
                 my_sum += val * self.supply_data.loc[key, "supply"]
-        my_sum = my_sum if my_sum else 1
+        my_sum = max(my_sum, 1.0)
         new_dict = {}
         for key, val in data.items():
-            new_dict[key] = val / my_sum
+            new_dict[key] = min(val / my_sum, 1.0)
         return new_dict
 
     def _get_softmax_vals(self, data):
@@ -298,7 +298,14 @@ class Extractor:
         return_dicts = []
         with self.build_order_db as db:
             for tick in ticks:
-                return_dicts.append(dict(db.get_by_keys(game_id, tick)))
+                try:
+                    return_dicts.append(dict(db.get_by_keys(game_id, tick)))
+                except TypeError as exc:
+                    msg = f"Data not found for inputs game_id={game_id}, tick={tick} (out of {ticks})"
+                    print(msg)
+                    msg = "Consider cleaning the db"
+                    print(msg)
+                    raise TypeError from exc
 
         return return_dicts
 

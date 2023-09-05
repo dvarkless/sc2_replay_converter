@@ -19,7 +19,21 @@ class Singleton(type):
 
 
 class DB(metaclass=Singleton):
+    """
+        Base class for accessing Postgres database.
+
+        A single class represents access for a single table,
+        to access another table you should recreate the class
+        instance.
+
+    """
     def __init__(self, config_path: str, db_return_type=None):
+        """
+        Args:
+            config_path: str - path to a yaml db config
+            db_return_type: str - ('dict', None) psycorg2 cursor return type
+                'dict' type returns data as DictRows
+        """
         self.config = get_config(config_path)
         self.db_return_type = db_return_type
         self.logger = get_logger(__name__)
@@ -87,6 +101,9 @@ class DB(metaclass=Singleton):
         return sql.SQL(query)
 
     def drop(self):
+        """
+            Drop table
+        """
         self.query = self.db_config["drop_table_file"]
         self._exec_update(self.query, self.name)
         self.logger.info(f'table "{self.name}" dropped')
@@ -115,6 +132,9 @@ class DB(metaclass=Singleton):
         self._save_changes()
 
     def exists(self):
+        """
+            Check if table exists.
+        """
         self.query = self.db_config["get_tables_file"]
         tables = list(self._exec_query_many(self.query, {}))
         return self.name in tables
@@ -220,6 +240,9 @@ class DB(metaclass=Singleton):
 
 
 class GameInfo(DB):
+    """
+        This class grants access to the game_info table.
+    """
     def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
         self._set_attrs(db_config_path, "game_info")
@@ -269,6 +292,12 @@ class GameInfo(DB):
         return game_id[0]
 
     def update_path(self, game_id, replay_path):
+        """
+            Change column `file_path` at the current id
+            Args:
+                game_id: int - game id
+                replay_path: str - path to the replay
+        """
         to_upload = {
             "game_id": game_id,
             "replay_path": str(replay_path),
@@ -277,6 +306,14 @@ class GameInfo(DB):
         self._exec_update(self.query, to_upload)
 
     def get_id_if_exists(self, players_hash, timestamp_played):
+        """
+            Returns game id if the replay object already exists
+            Args:
+                players_hash: str - hash of players' nicknames
+                timestamp_player: datetime.timestamp - date played
+            Returns:
+                game_id: int | None - return id if it exists
+        """
         timestamp_played = pgsql.TimestampFromTicks(timestamp_played)
         to_upload = {
             "players_hash": players_hash,
@@ -294,6 +331,13 @@ class GameInfo(DB):
         return result_id if out is not None else None
 
     def get_players_info(self, game_id):
+        """
+            Return info about players (see "select_player" sql query)
+            Args:
+                game_id: int - game id
+            Returns:
+                out: tuple - players info (len = 7)
+        """
         self.query = self.db_config["select_player"]
         out = self._exec_query_one(self.query, {"game_id": game_id})
         return out
@@ -304,6 +348,9 @@ class GameInfo(DB):
 
 
 class PlayerInfo(DB):
+    """
+        This class grants access to the player_info table.
+    """
     def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
         self._set_attrs(db_config_path, "player_info")
@@ -372,6 +419,9 @@ class PlayerInfo(DB):
 
 
 class MapInfo(DB):
+    """
+        This class grants access to the map_info table.
+    """
     def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path)
         self._set_attrs(db_config_path, "map_info")
@@ -411,6 +461,9 @@ class MapInfo(DB):
 
 
 class BuildOrder(DB):
+    """
+        This class grants access to the build_order table.
+    """
     def __init__(self, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, "build_order")
@@ -424,6 +477,14 @@ class BuildOrder(DB):
         return self._exec_query_many(self.query, {})
 
     def get_by_keys(self, game_id, tick):
+        """
+            Gets build order by the primary key
+            Args:
+                game_id: int - game id
+                tick: int - game tick
+            Returns:
+                out: dict
+        """
         to_upload = {
             "game_id": game_id,
             "tick": tick,
@@ -433,19 +494,37 @@ class BuildOrder(DB):
 
 
 class MatchupDB(DB):
+    """
+        This class grants access to the matchup tables.
+    """
     def __init__(self, table_name, secrets_path: str, db_config_path: str):
         super().__init__(secrets_path, db_return_type="dict")
         self._set_attrs(db_config_path, "matchup_table")
         self.name = table_name
         self.table_created = False
 
-    def change_table(self, table_name):
+    def change_table(self, table_name: str):
+        """
+            Changes the current table, use this method instead of recreating the class instance
+            Args:
+                table_name: str
+        """
         self.name = table_name
         self.table_created = False
 
     def construct_create_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
+        """
+            Constructs query to create the table.
+            You must provide a valid keys
+            Args:
+                player_entities: dict - player's objects
+                enemy_entities: dict - enemy's objects
+                out_entities: dict - output objects
+            Returns:
+                query: str
+        """
         input_entities = player_entities | enemy_entities
         query = ", ".join((f"{name} INTEGER" for name in input_entities.keys()))
         query += ", "
@@ -459,6 +538,16 @@ class MatchupDB(DB):
     def construct_insert_query(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
+        """
+            Constructs query to insert data into the table.
+            You must provide a valid keys
+            Args:
+                player_entities: dict - player's objects
+                enemy_entities: dict - enemy's objects
+                out_entities: dict - output objects
+            Returns:
+                query: str
+        """
         entities = player_entities | enemy_entities | out_entities
         input_query = ",\n".join((f"{name}" for name in entities.keys()))
         get_query = ",\n".join((f"%({name})s" for name in entities.keys()))
@@ -473,6 +562,16 @@ class MatchupDB(DB):
     def create_table(
         self, player_entities: dict, enemy_entities: dict, out_entities: dict
     ):
+        """
+            Creates the table.
+            You must provide a valid keys
+            Args:
+                player_entities: dict - player's objects
+                enemy_entities: dict - enemy's objects
+                out_entities: dict - output objects
+            Returns:
+                query: str
+        """
         query = self.construct_create_query(
             player_entities, enemy_entities, out_entities
         )
@@ -489,11 +588,19 @@ class MatchupDB(DB):
         self._exec_insert(query, key_dict | player_entities | enemy_entities | out_entities)
 
     def get_id(self, game_id):
+        """
+            Gets all the data in the current game_id
+            Args:
+                game_id: int - game_id
+        """
         to_pass = {"game_id": game_id}
         self.query = self.db_config["select_where_id"]
         return self._exec_query_many(self.query, to_pass)
 
     def get_by_key(self, game_id, tick):
+        """
+            Get data by the primary key
+        """
         to_pass = {"game_id": game_id, "tick": tick}
         self.query = self.db_config["select_where_key"]
         return self._exec_query_one(self.query, to_pass)

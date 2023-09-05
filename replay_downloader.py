@@ -13,6 +13,14 @@ from config import get_config
 
 
 async def download_files(files_list, destination, website_name, page=0):
+    """
+    Download files from the list of links into the destination directory.
+    Args:
+        files_list: list[str] - list of download links
+        destination: str - destination path
+        website_name: str - used for naming files
+        page: int - used for naming files
+    """
     sema = asyncio.BoundedSemaphore(5)
 
     async def download_file(semaphore, session, url, name):
@@ -34,6 +42,10 @@ async def download_files(files_list, destination, website_name, page=0):
 
 
 class ReplayDownloader:
+    """
+    Class used for parsing websites with replays to extract them
+    """
+
     def __init__(
         self,
         destination_path,
@@ -41,6 +53,13 @@ class ReplayDownloader:
         max_count: int = -1,
         jupyter=None,
     ) -> None:
+        """
+        Args:
+            destination_path: str - path to dowload replays to
+            config_path: str - path of scrapper config data
+            max_count: int - number of files to download
+            jupyter: bool | None - fix progress bar
+        """
         self.config = get_config(config_path)
         self.max_count = max_count if max_count > 0 else 10e5
         self.change_destination(destination_path)
@@ -57,13 +76,23 @@ class ReplayDownloader:
         league=None,
         is_ladder=None,
     ):
+        """
+        Start the extraction process
+        Args:
+            website_name: str - website name to extract from
+            game_matchup: str - look for only this game mode (1v1)
+            game_min_length: int - in seconds
+            game_max_length: int - in seconds
+            league: int - minimum players league filter if available
+            is_lagger: bool - get only ladder games if available
+        """
         # Check website availability
         try:
             self.url = self.config[website_name]["url"]
         except KeyError:
             raise KeyError(f'Unknown website name: "{website_name}"')
         self.website_name = website_name
-        r = requests.head(self.url)
+        r = requests.head(self.url, timeout=30)
         assert r.status_code == 200
 
         init_soup = self._get_parsed_site(
@@ -128,10 +157,15 @@ class ReplayDownloader:
                 self.config[self.website_name]["keys"]["page_increment"]
             )
             return curr_max_page // page_increment
-        else:
-            return 0
+        return 0
 
     def change_destination(self, new_destination):
+        """
+            Change file downloading destination.
+            Ignores if the dir already exists.
+            Args:
+                new_destination: str - path to the new dir
+        """
         new_destination = Path(new_destination)
         new_destination.mkdir(exist_ok=True)
         assert new_destination.is_dir()
@@ -166,7 +200,7 @@ class ReplayDownloader:
                 pass
         headers = {"User-Agent": self.config["headers"]["user_agent"]}
         search_url = self.url + self.config[self.website_name]["header"]
-        r = requests.get(search_url, params=params, headers=headers)
+        r = requests.get(search_url, params=params, headers=headers, timeout=30)
         if r.status_code != 200:
             raise ConnectionError(f"Bad server response: code {r.status_code}")
         return BeautifulSoup(r.content, "html5lib")
@@ -192,7 +226,19 @@ class ReplayDownloader:
             for game_id, link, game_len_str in self.sc2rep_yield(soup):
                 yield parse_data(game_id, link, game_len_str)
 
-    def spawningtool_yield(self, soup: BeautifulSoup):
+    def spawningtool_yield(self, soup: beautifulsoup):
+        """
+            Finds download links and other data in the soup. 
+            Configured for Spawningtool website.
+            Args:
+                soup: beautifulsoup - parsed site
+            Returns:
+                Generator(
+                        game_id: str
+                        ref_link: str - download link
+                        game_len: str
+                        )
+        """
         soup = soup.find("table", class_="table table-striped")
         for row in soup.find_all("tr"):
             ref_link = ""
@@ -208,6 +254,18 @@ class ReplayDownloader:
             yield (game_id, ref_link, game_len)
 
     def sc2rep_yield(self, soup: BeautifulSoup):
+        """
+            Finds download links and other data in the soup. 
+            Configured for Sc2rep website.
+            Args:
+                soup: beautifulsoup - parsed site
+            Returns:
+                Generator(
+                        game_id: str
+                        ref_link: str - download link
+                        game_len: str
+                        )
+        """
         soup = soup.find_all(
             "table", attrs={"width": "95%", "cellspacing": "2", "cellpadding": "2"}
         )[1]

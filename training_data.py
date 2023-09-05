@@ -10,26 +10,63 @@ from replay_process import ReplayFilter
 
 
 class ReorganizePlayers:
+    """
+        Separate build_order data by a player, check if
+    """
     def __init__(
         self, player: str, enemy: str, min_league: int, include_unranked=True
     ) -> None:
+        """
+            Args:
+                player: str - The race of the player that is being checked against.
+                enemy: str - The race of the enemy that is being checked against.
+                min_league: int - The minimum league to include in the check.
+                include_unranked: bool - Whether or not to include unranked matches in the check. 
+        """
         self.player = player
         self.enemy = enemy
         self.min_league = min_league
         self.include_unranked = include_unranked
 
     def check_matchup(self, player_race, enemy_race):
+        """
+            Check if the matchup is valid.
+            
+            Args:
+                player_race: str - The race of the player that is being checked against.
+                enemy_race: str - The race of the enemy that is being checked against.
+            Returns:
+                bool - Whether or not the matchup is valid.
+        """
         if player_race == self.player and enemy_race == self.enemy:
             return True
         return False
 
     def check_league(self, player_data):
+        """
+            Check if the league of a player is valid.
+            
+            Args:
+                player_data: dict - The data for the player to be checked against.
+            Returns:
+                bool - Whether or not the league is valid.
+        """
         player_league = player_data["league"]
         if self.include_unranked:
             return bool(player_league >= self.min_league or player_league == 0)
         return bool(player_league >= self.min_league)
 
     def transform(self, data_dict):
+        """
+            Transform the data to be in a format that is easier to work with.
+            
+            Args:
+                data_dict : dict - The data for the matchup to be transformed.
+
+            Returns:
+                tuple[bool, str, bool] - A tuple containing whether or not the matchup was valid, 
+                which player played, and if the player won
+        """
         p1r, p1w = data_dict["player_1"]["race"], data_dict["player_1"]["is_win"]
         p2r, p2w = data_dict["player_2"]["race"], data_dict["player_2"]["is_win"]
         p1_pass = self.check_league(data_dict["player_1"])
@@ -45,6 +82,14 @@ class RandomPoints:
     def __init__(
         self, mean_step, sigma, get_final_point: bool, final_point_step, tick_step
     ) -> None:
+        """
+            Args:
+                mean_step: float - Mean step size between random points.
+                sigma: float - Sigma of the normal distribution for random step size.
+                get_final_point: bool - Whether to include a final point or not.
+                final_point_step: int - Distance between the current point and the next point.
+                tick_step: int - Game tick step size, defined earlier.
+        """
         self.mean_step = mean_step
         self.sigma = sigma
         self.get_final_point = get_final_point
@@ -59,6 +104,15 @@ class RandomPoints:
         return val // self.tick_step
 
     def get_random_ticks(self, end_val):
+        """
+            Gets random ticks.
+
+            Args:
+                end_val: int - End value of the range.
+
+            Returns:
+                list[int] - List of random ticks.
+        """
         end_pos = self._from_tick(end_val)
         out_pos = 0
         out_list = []
@@ -74,6 +128,14 @@ class RandomPoints:
         return out_list if out_list else worst_case_val
 
     def get_final_points(self, starting_points, end_val):
+        """
+            Args:
+                starting_points: list[int] - Starting points.
+                end_val: int - End value of the range.
+
+            Returns:
+                list[int] - List of final points.
+        """
         final_points = []
         if self.get_final_point:
             for point in starting_points:
@@ -83,6 +145,13 @@ class RandomPoints:
         return final_points
 
     def transform(self, end_val):
+        """
+            Args:
+                end_val: int - End value of the range.
+
+            Returns:
+                tuple[list[int], list[int]] - Tuple of random ticks and final points.
+        """
         out_points = self.get_random_ticks(end_val)
         final_points = self.get_final_points(out_points, end_val)
         out_ticks = [self._to_tick(p) for p in out_points]
@@ -102,6 +171,11 @@ class NormalizeColumns:
     ]
 
     def __init__(self, game_info_file, supply_data_file) -> None:
+        """
+            Args:
+                game_info_file: str - path to game_info.csv
+                supply_data_file: str - path to supply_data_file.csv
+        """
         self.supply_data = pd.read_csv(supply_data_file, index_col="name")
         self.game_info = pd.read_csv(game_info_file, index_col="name")
         self.game_info = self.game_info.rename(index=str.lower)
@@ -125,6 +199,15 @@ class NormalizeColumns:
         self.include_units = include_units
 
     def filter_columns(self, data):
+        """
+            Return columns by filtering defined in `setup_filter`
+            Args:
+                data: dict - build_order data
+
+            Returns:
+                data: dict - filtered build_order data
+        """
+
         # ("player_N_column", int_val)
         pairs = list(data.items())
         # Example:
@@ -170,6 +253,9 @@ class NormalizeColumns:
         return df
 
     def normalize_units(self, name, val):
+        """
+            Return supply of a unit
+        """
         if name in self.supply_data.index:
             val *= self.supply_data.loc[name, "supply"]
         return (name, val)
@@ -181,14 +267,37 @@ class NormalizeColumns:
 
 class CalcWinprob:
     def __init__(self, delay=5) -> None:
+        """
+        Calculate the win probability that the player will win
+        in the `end_tick`, if the game is still going, 
+        make answer closer to 0.5
+        
+        Args:
+            delay (int): Lag defining the sigmoid function
+                        sensibility
+        """
         self.delay = delay
 
     def transform(self, final_tick, is_win, end_tick):
+        """
+            Calculates sigmoid
+      
+            Args:
+                final_tick: int - Final tick of the game.
+                is_win: bool - Whether or not the team won.
+                end_tick: int - Ending tick of the game.
+                
+            Returns:
+                float: Probability that the player will win.
+        """
         arg = is_win * (final_tick / end_tick) * self.delay
         return 1 / (1 + exp(-arg))
 
 
 class DensityVals:
+    """
+        Normalize values
+    """
     def __init__(
         self,
         supply_data_file,
@@ -264,6 +373,9 @@ class DensityVals:
 
 
 class Extractor:
+    """
+        Extracts data from a tables with a preprocessed values
+    """
     def __init__(self, game_info_db, build_order_db, ticks_per_second) -> None:
         self.game_info_db = game_info_db
         self.build_order_db = build_order_db
@@ -311,6 +423,9 @@ class Extractor:
 
 
 class Loader:
+    """
+        Loads data into a dataset tables
+    """
     possible_r = set(("z", "t", "p"))
     possible_table_types = set(("comp", "winprob", "enemycomp"))
 

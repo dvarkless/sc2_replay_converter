@@ -10,6 +10,27 @@ from starcraft2_replay_parse.replay_tools import BuildOrderData, ReplayData
 
 
 class ReplayFilter:
+    """
+    Setups and runs a replay filter.
+    Can print skipped replays and filter configuration.
+    Where are several criteria:
+        is_ladder:
+            Check if it is a ladder game.
+        league:
+            Compare min. players league.
+        time_played:
+            Sets date constrain on the games.
+        is_1v1:
+            Filters out non-1v1 game such as Coop, 2v2, Campaign and so on.
+        has_race:
+            Check if the replay has a player with the requested game race.
+        matchup:
+            Checks matchup, works in reverse too.
+        game_len:
+            Skip if the game is too short or too long.
+
+    """
+
     _is_ladder_types = {
         "disable": None,
         "valid": [bool],
@@ -64,6 +85,11 @@ class ReplayFilter:
         self.report = "No report to show, please call this instance"
 
     def get_valid_types(self, name):
+        """
+            Prints info about the class' filter
+            Args:
+                name: str - filter_name
+        """
         assert hasattr(self, name)
         types_dict = getattr(self, f"_{name}_types")
         disable_type = types_dict["disable"]
@@ -92,6 +118,15 @@ class ReplayFilter:
                 self.logger.info(to_print)
 
     def is_val_matches(self, val, v_type):
+        """
+            Check if the compared value matches that of the
+            accepted filter values
+            Args:
+                val: Any - compared value
+                v_type: dict - filter data
+            Returns:
+                is_matches: bool
+        """
         root_type = v_type["root"]
         if not isinstance(val, root_type):
             return False
@@ -110,6 +145,12 @@ class ReplayFilter:
         return True
 
     def setup_val(self, name, val):
+        """
+            Setup filter by name
+            Args:
+                name: str - filter name
+                val: Any - filter value
+        """
         bad_finish = False
         my_types = getattr(self, f"_{name}_types")
         for key, types in my_types.items():
@@ -248,6 +289,14 @@ class ReplayFilter:
 
 
 class ReplayProcess:
+    """
+        Loads replays from the filesystem, processes them
+        using the starcraft2_replay_parse lib and sends them 
+        to the database.
+
+        This is a preprocessing step. The training data is 
+        prepared in the pipeline.
+    """
     def __init__(
         self,
         secrets_path,
@@ -257,6 +306,15 @@ class ReplayProcess:
         ticks_per_pos=32,
         jupyter=None,
     ) -> None:
+        """
+            Args:
+                secrets_path: str - path to the secrets file
+                db_config: str - path to the db config
+                game_data_path: str - path to the game_info.csv file
+                max_tick: int - maximum game length in tick (1s = 16 ticks)
+                ticks_per_pos: int - step size between values in the DB
+                jupyter: bool | None - fix the progress bar issues
+        """
         self.game_info_db = GameInfo(secrets_path, db_config)
         self.build_order_db = BuildOrder(secrets_path, db_config)
         self.player_info_db = PlayerInfo(secrets_path, db_config)
@@ -276,13 +334,19 @@ class ReplayProcess:
         self.corrupted_data_list = []
 
     def init_dbs(self):
+        """
+            Creates the necessary DBs
+        """
         for db in self.dbs:
             # with db:
             #     db.drop()
             with db:
                 db.create_table()
 
-    def upload_game_info(self, replay, replay_path):
+    def _upload_game_info(self, replay, replay_path):
+        """
+            Upload data into the game_info DB
+        """
         replay_data = replay.as_dict()
         game_info = {}
         date_played = replay.replay.date
@@ -320,10 +384,13 @@ class ReplayProcess:
         game_info["matchup"] = replay_data["matchup"]
         game_info["is_ladder"] = replay.is_ranked
         game_info["replay_path"] = str(replay_path.resolve())
-        game_id = self.upload_info(self.game_info_db, game_info)
+        game_id = self._upload_info(self.game_info_db, game_info)
         return game_id
 
-    def upload_map_info(self, replay):
+    def _upload_map_info(self, replay):
+        """
+            Upload data into the map_info DB
+        """
         replay_data = replay.as_dict()
         num_players = len(replay_data["matchup"].split("v")) // 2
         matchup_type = f"{num_players}v{num_players}"
@@ -334,9 +401,12 @@ class ReplayProcess:
             "matchup_type": matchup_type,
             "game_date": date,
         }
-        self.upload_info(self.map_info_db, map_info)
+        self._upload_info(self.map_info_db, map_info)
 
-    def upload_player_info(self, replay):
+    def _upload_player_info(self, replay):
+        """
+            Upload data into the player_info DB
+        """
         replay_data = replay.as_dict()
         forbidden_symbols = "%<>&;"
         for name in replay.player_names:
@@ -351,13 +421,20 @@ class ReplayProcess:
                 "league_int": replay_data["players_data"][name]["league"],
                 "is_win": name in replay_data["winners"],
             }
-            self.upload_info(self.player_info_db, player_info)
+            self._upload_info(self.player_info_db, player_info)
 
     def delete_game(self, game_id):
+        """
+            Deletes game from the game_info table.
+            Useful then the upload was interrupted.
+        """
         with self.game_info_db as db:
             db.delete_id(game_id)
 
-    def upload_build_order(self, replay, game_id, bar=None):
+    def _upload_build_order(self, replay, game_id, bar=None):
+        """
+            Upload data into the build_order DB
+        """
         replay_data = replay.as_dict()
         full_upload_dict = {}
         try:
@@ -388,6 +465,7 @@ class ReplayProcess:
             to_upload_dict["game_id"] = game_id
             to_upload_dict["tick"] = tick
             if tick == 0:
+                # One of this values is always > 0, if not, the game is corrupted
                 s, d, p = (
                     to_upload_dict["player_1_unit_scv"],
                     to_upload_dict["player_1_unit_drone"],
@@ -400,24 +478,43 @@ class ReplayProcess:
             if bar is not None:
                 bar.text = f"Processed {j/ticks_len:.1%}"
             try:
-                self.upload_info(self.build_order_db, to_upload_dict)
+                self._upload_info(self.build_order_db, to_upload_dict)
             except KeyboardInterrupt:
                 print("KeyboardInterrupt detected! Exiting after data upload finishes")
                 exit_code = True
         if exit_code:
             raise KeyboardInterrupt
 
-    def upload_info(self, db, to_upload_dict):
+    def _upload_info(self, db, to_upload_dict):
+        """
+            Upload the parsed data into the DB
+        """
         out = None
         with db:
             out = db.put(**to_upload_dict)
         return out
 
     def game_id_if_exists(self, players_hash, timestamp_played):
+        """
+            Returns game id if the replay object already exists
+            Args:
+                players_hash: str - hash of players' nicknames
+                timestamp_player: datetime.timestamp - date played
+            Returns:
+                game_id: int | None - return id if it exists
+        """
         with self.game_info_db:
             return self.game_info_db.get_id_if_exists(players_hash, timestamp_played)
 
     def process_replays(self, replay_dir, filt=None):
+        """
+            Load replay from the filesystem into the DB.
+            Parse data from `.SC2Replay` object into the DB rows.
+            Shows progress bar
+            Args:
+                replay_dir: str - path to the directory with replays
+                filt: ReplayFilter | None - filter instance
+        """
         replay_dir = Path(replay_dir)
         list_file = [p for p in replay_dir.iterdir() if p.suffix == ".SC2Replay"]
         if self.jupyter in (True, False):
@@ -446,10 +543,10 @@ class ReplayProcess:
 
             game_id = self.game_id_if_exists(players_hash, timestamp_played)
             if game_id is None:
-                self.upload_map_info(replay)
-                self.upload_player_info(replay)
-                id = self.upload_game_info(replay, replay_path)
-                self.upload_build_order(replay, id, bar=bar)
+                self._upload_map_info(replay)
+                self._upload_player_info(replay)
+                id = self._upload_game_info(replay, replay_path)
+                self._upload_build_order(replay, id, bar=bar)
             else:
                 with self.game_info_db:
                     self.game_info_db.update_path(game_id, replay_path)

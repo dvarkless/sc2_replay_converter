@@ -83,7 +83,7 @@ Configuration files can be found in `./configs` directory
 
 ### Database access:
 
-File './configs/secrets.yml'
+File `./configs/secrets.yml`
 
 ```yaml
 db_host: localhost # Database url address
@@ -92,7 +92,7 @@ db_user: dvarkless # Username which can interract with the DB
 db_password: password # Password for this user, set to `None` if it is not set
 ```
 
-File './configs/downloader_config.yml'
+File `./configs/downloader_config.yml`
 
 The only reasonable thing to change here is user-agent:
 
@@ -218,7 +218,7 @@ out_winprob: NUMERIC(4, 3) # 0.001 # probability what this game ends in 1 minute
 								   # or 0 - player's defeat
 ```
 
-#### _*enemycomp tables:
+#### *_enemycomp tables:
 > [NOTE]
 > This tables are used to train agents to predict enemy composition based
 > on scouted buildings.
@@ -239,7 +239,6 @@ This affect table's unit, building and upgrades columns. Columns can be found in
 `./starcraft2_replay_parse/data/game_info.csv`.  
 > [NOTE]
 > Mirror matchups count twice, player and enemy change their places.  
-
 
 ## License
 

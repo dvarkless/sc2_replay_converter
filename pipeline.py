@@ -8,6 +8,19 @@ from training_data import (CalcWinprob, DensityVals, Extractor, Loader,
 
 
 class Pipeline:
+    """
+    Transforms preprocessed data into datasets
+
+    Uses data from tables:
+        `game_info`,
+        `build_order`
+
+    Creates datasets in tables:
+        `(matchup)_comp`
+        `(matchup)_winprob`
+        `(matchup)_enemycomp`
+    """
+
     steps = []
     possible_r = set(("z", "t", "p"))
     ticks_per_min = 960
@@ -22,6 +35,16 @@ class Pipeline:
         min_len=1920,
         jupyter=None,
     ) -> None:
+        """
+        Args:
+            player_r: str - player's game race
+            enemy_r: str - enemy's game race
+            mins_per_point: int - used in random sampling
+            game_ticks_per_second: int - replay game speed
+            tick_step: int - step in tick in the database
+            min_len: int - minimum game length in ticks
+            jupyter: bool | None - fix progress bar
+        """
         self.player_r = player_r
         self.enemy_r = enemy_r
         self.ticks_per_point = mins_per_point * self.ticks_per_min
@@ -31,17 +54,40 @@ class Pipeline:
         self.min_len = min_len
 
     def configure_dbs(self, secrets_path, db_config_path):
+        """
+        Configures preprocessed data tables.
+
+        Args:
+            secrets_path: str - path to secrets file
+            db_config_path: str - path to db config
+        """
         self.secrets_path = secrets_path
         self.db_config_path = db_config_path
         self.game_info_db = GameInfo(secrets_path, db_config_path)
         self.build_order_db = BuildOrder(secrets_path, db_config_path)
 
     def configure_organize(self, player_r, enemy_r, min_league, include_unranked=True):
+        """
+        Configures ReorganizePlayers class
+        Args:
+            player_r: str - player's game race
+            enemy_r: str - enemy's game race
+            min_league: int - filter out leagues below this val
+            include_unranked: bool - include league=0
+        """
         self.organize = ReorganizePlayers(
             player_r, enemy_r, min_league, include_unranked
         )
 
     def configure_points(self, sigma, get_final_point, final_point_step):
+        """
+        Configures ReorganizePlayers class
+        Args:
+            player_r: str - player's game race
+            enemy_r: str - enemy's game race
+            min_league: int - filter out leagues below this val
+            include_unranked: bool - include league=0
+        """
         self.points = RandomPoints(
             mean_step=self.ticks_per_point,
             sigma=sigma,
@@ -51,15 +97,36 @@ class Pipeline:
         )
 
     def configure_normalize(self, game_info_file, supply_data_file):
+        """
+        Configures NormalizeColumns class
+        Args:
+            game_info_file: str - path to game_info.csv
+            supply_data_file: str - path to supply_data file
+        """
         self.normalize = NormalizeColumns(game_info_file, supply_data_file)
 
     def configure_calc_winprob(self, delay):
+        """
+        Configures CalcWinprob class
+        Args:
+            delay: int - Lag defining the sigmoid function
+                         sensibility
+        """
         self.winprob = CalcWinprob(delay)
 
     def configure_dense(self, supply_data_file, reducer):
+        """
+        Configures DensityVals class
+        Args:
+            supply_data_file: str - path to game_info.csv
+            reducer: str - ['avg', 'softmax'] reducer formula
+        """
         self.dense = DensityVals(supply_data_file, reducer)
 
     def configure_extractor(self):
+        """
+        Configures Extractor class
+        """
         self.extractor = Extractor(
             self.game_info_db, self.build_order_db, self.game_ticks_per_second
         )
@@ -111,6 +178,17 @@ class Pipeline:
                     yield (id, curr_player, is_win, data["end_tick"])
 
     def run(self):
+        """
+        Run pipeline.
+
+        Transformation process:
+            1. Extract all game ids from the game_info
+            2. For each player:
+            2.1 Get random starting and ending ticks
+            2.2 Get player's build_order data for each tick
+            2.3 Transform extracted data columns to expected format
+            2.4 Load data into a new table
+        """
         if not all((hasattr(self, name) for name in self.steps)):
             vals = [f"{name}: {hasattr(self, name)}\n" for name in self.steps]
             raise ValueError(f"Missing configured steps: \n{vals}")
@@ -148,6 +226,10 @@ class Pipeline:
 
 
 class CompPipeline(Pipeline):
+    """
+    Pipeline for creating `(matchup)_comp` datasets
+    """
+
     steps = [
         "extractor",
         "organize",
@@ -184,6 +266,10 @@ class CompPipeline(Pipeline):
 
 
 class WinprobPipeline(Pipeline):
+    """
+    Pipeline for creating `(matchup)_winprob` datasets
+    """
+
     steps = [
         "extractor",
         "organize",
@@ -220,6 +306,10 @@ class WinprobPipeline(Pipeline):
 
 
 class EnemycompPipeline(Pipeline):
+    """
+    Pipeline for creating `(matchup)_enemycomp` datasets
+    """
+
     steps = [
         "extractor",
         "organize",
@@ -254,7 +344,17 @@ class EnemycompPipeline(Pipeline):
 
 
 class PipelineComposer:
+    """
+    Configures and returns pipeline for each case.
+    """
+
     def __init__(self, matchup: str, tick_step=16, jupyter=None) -> None:
+        """
+        Args:
+            matchup: str - two game races separated with 'v' ['ZvT', 'TvP' ...]
+            tick_step: int - step of data in preprocessed DB
+            jupyter: bool | None - fix progress bar
+        """
         self.player_r, self.enemy_r = matchup.lower().split("v")
         self.jupyter = jupyter
         self.tick_step = tick_step
@@ -264,11 +364,25 @@ class PipelineComposer:
         self.supply_data_file = "./game_data/supply_data.csv"
 
     def change_matchup(self, matchup):
+        """
+        Changes dataset table with new matchup value.
+
+        Args:
+            matchup: str - two game races separated with 'v' ['ZvT', 'TvP' ...]
+
+        """
         self.player_r, self.enemy_r = matchup.lower().split("v")
 
     def get_compositon(
-        self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
+        self,
+        mins_per_sample: int,
+        prediction_minute_step: int,
+        min_league: int,
+        reducer="avg",
     ):
+        """
+        Configure and return CompPipeline
+        """
         pipeline = CompPipeline(
             self.player_r,
             self.enemy_r,
@@ -294,6 +408,9 @@ class PipelineComposer:
     def get_win_probability(
         self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
     ):
+        """
+        Configure and return WinprobPipeline
+        """
         pipeline = WinprobPipeline(
             self.player_r,
             self.enemy_r,
@@ -321,6 +438,9 @@ class PipelineComposer:
     def get_enemy_composition(
         self, mins_per_sample, prediction_minute_step, min_league, reducer="avg"
     ):
+        """
+        Configure and return EnemycompPipeline
+        """
         pipeline = EnemycompPipeline(
             self.player_r,
             self.enemy_r,

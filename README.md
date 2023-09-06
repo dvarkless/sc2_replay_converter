@@ -5,7 +5,10 @@
 Extracts data from websites and creates datasets for ML or analysis purposes.
 
 [Setup](#setup) •
+[Configuration](#configuration) •
 [Usage](#usage) •
+[Table schemes](#table-schemes) •
+
 </div>
 
 ## About the Project
@@ -169,8 +172,9 @@ PRIMARY KEYS: `tick`, `game_id`.
 FOREIGN KEY: `game_id` REFERENCES `game_info`.  
 Their structure:   
 #### *_comp tables:
-![NOTE] This tables are used to train which unit the agent should build next based
-on army composition and scouting info.
+> [NOTE]
+> This tables are used to train which unit the agent should build next based
+> on army composition and scouting info.
 
 ```sh
 player_unit: INTEGER,
@@ -186,8 +190,9 @@ out_unit: NUMERIC(4, 3) # 0.001 # player's units in 1 minute from current tick
 ```
 
 #### *_winprob tables:
-![NOTE] This tables are used to train agents to predict game outcome based on
-the available information.
+> [NOTE]
+> This tables are used to train agents to predict game outcome based on
+> the available information.
 
 ```sh
 game_id: INTEGER,
@@ -210,8 +215,9 @@ out_winprob: NUMERIC(4, 3) # 0.001 # probability what this game ends in 1 minute
 ```
 
 #### _*enemycomp tables:
-![NOTE] This tables are used to train agents to predict enemy composition based
-on scouted buildings.
+> [NOTE]
+> This tables are used to train agents to predict enemy composition based
+> on scouted buildings.
 
 ```sh
 game_id: INTEGER,
@@ -227,7 +233,8 @@ The last letter is enemy's race.
 For example, 'ZvT' means player = 'Zerg', enemy = 'Terran'.  
 This affect table's unit, building and upgrades columns. Columns can be found in
 `./starcraft2_replay_parse/data/game_info.csv`.  
-![NOTE] Mirror matchups count twice, player and enemy change their places.  
+> [NOTE]
+> Mirror matchups count twice, player and enemy change their places.  
 
 
 ## License

@@ -73,6 +73,10 @@ If you are using Windows:
 ```sh
 pip install -r requirements.txt
 ```
+5. Download submodule
+```sh
+git submodule update --init --recursive
+```
 
 ## Configuration
 Configuration files can be found in `./configs` directory

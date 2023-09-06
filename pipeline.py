@@ -360,7 +360,7 @@ class PipelineComposer:
         self.tick_step = tick_step
         self.secrets_path = "./configs/secrets.yml"
         self.db_config_path = "./configs/database.yml"
-        self.game_info_file = "./starcraft2_replay_parse/game_info.csv"
+        self.game_info_file = "./starcraft2_replay_parse/data/game_info.csv"
         self.supply_data_file = "./game_data/supply_data.csv"
 
     def change_matchup(self, matchup):

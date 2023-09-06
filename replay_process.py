@@ -565,7 +565,7 @@ if __name__ == "__main__":
     processor = ReplayProcess(
         "./configs/secrets.yml",
         "configs/database.yml",
-        "./starcraft2_replay_parse/game_info.csv",
+        "./starcraft2_replay_parse/data/game_info.csv",
         ticks_per_pos=32,
     )
     processor.process_replays("../replays/", filt=replay_filter)

@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from functools import wraps
 
 import pandas as pd
 from alive_progress import alive_it
@@ -458,6 +459,7 @@ class ReplayProcess:
         ticks = self.build_order_cls.get_ticks()
         ticks_len = len(ticks)
         exit_code = False
+        to_upload_list = []
         for j, tick in enumerate(ticks):
             to_upload_dict = {}
             for key, val in full_upload_dict.items():
@@ -475,15 +477,16 @@ class ReplayProcess:
                     print(f"Corrupted data at game_id = {game_id}")
                     self.corrupted_data_list.append(game_id)
                     return
+
+            to_upload_list.append(to_upload_dict)
             if bar is not None:
                 bar.text = f"Processed {j/ticks_len:.1%}"
-            try:
-                self._upload_info(self.build_order_db, to_upload_dict)
-            except KeyboardInterrupt:
-                print("KeyboardInterrupt detected! Exiting after data upload finishes")
-                exit_code = True
         if exit_code:
             raise KeyboardInterrupt
+
+        with self.build_order_db as db:
+            for data_info in to_upload_list:
+                db.put(**data_info)
 
     def _upload_info(self, db, to_upload_dict):
         """

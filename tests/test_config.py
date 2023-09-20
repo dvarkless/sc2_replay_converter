@@ -1,5 +1,3 @@
-import pathlib
-
 import pytest
 
 from config import get_config
